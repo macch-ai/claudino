@@ -1,0 +1,13 @@
+[Unit]
+Description=Claude relay: hand Sentry alerts in #production-errors to Claude
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/claude-relay/env
+ExecStart=%h/claude-relay/.venv/bin/python %h/claude-relay/relay.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
