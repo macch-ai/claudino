@@ -28,17 +28,22 @@ Slack relay that hands Macch's engineering work to Claude Code on **hermes**.
 - The Claude Code CLI must be logged in (`claude auth status`).
 - Slack app bot scopes: channels:history, channels:read, chat:write, im:write, reactions:read, reactions:write, emoji:read, files:read.
 
-## Deploy
+## CI/CD (Depot CI)
 
-The checkout lives at `~/claude-relay` on hermes:
+`.depot/workflows/ci-cd.yml` runs the tests on every pull request and push. Every merge to `main` then deploys to hermes:
 
-```sh
-cd ~/claude-relay && git pull && .venv/bin/pip install -r requirements.txt
-export XDG_RUNTIME_DIR=/run/user/$(id -u)
-systemctl --user restart claude-relay && journalctl --user -u claude-relay -f
-```
+1. The deploy job joins the tailnet as `tag:ci` (Tailscale OAuth client in the Depot CI secrets `TS_OAUTH_CLIENT_ID` / `TS_OAUTH_SECRET`).
+2. It calls `POST http://100.99.99.71:8765/deploy?sha=<commit>` on **claudino-deployer** (`deploy/deployer.py`), a small service that listens only on hermes' Tailscale address. Its only action: fast-forward `~/claude-relay` to `origin/main` (refusing any other commit) and run `scripts/deploy.sh`.
+3. `scripts/deploy.sh` installs requirements, runs the tests, refreshes the systemd unit if it changed, restarts `claude-relay` and checks it reconnected to Slack. If any step fails it resets to the previous commit and restarts that.
+4. The job checks `GET /health` reports the merged commit.
 
-First install: `uv venv .venv && .venv/bin/pip install -r requirements.txt`, copy `deploy/claude-relay.service` to `~/.config/systemd/user/`, run `scripts/set-tokens.sh`, then `systemctl --user enable --now claude-relay`.
+Manual deploy on hermes, if CI is unavailable: `cd ~/claude-relay && git pull --ff-only && scripts/deploy.sh "$(git rev-parse HEAD@{1})"`.
+
+Changes to `deploy/deployer.py` itself take effect after `systemctl --user restart claudino-deployer` on hermes.
+
+## First install on hermes
+
+`uv venv .venv && uv pip install --python .venv/bin/python -r requirements.txt`, copy `deploy/*.service` to `~/.config/systemd/user/`, run `scripts/set-tokens.sh`, then `systemctl --user enable --now claude-relay claudino-deployer`.
 
 ## Tests
 

@@ -1,0 +1,44 @@
+name: CI/CD
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: depot-ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -t . -v
+
+  deploy:
+    # Every merge to main deploys to hermes through its tailnet-only deploy endpoint.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: depot-ubuntu-24.04
+    concurrency:
+      group: deploy-hermes
+      cancel-in-progress: false
+    steps:
+      - name: Join the tailnet
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+      - name: Deploy to hermes
+        run: |
+          status=$(curl -sS -o deploy.log -w '%{http_code}' --max-time 600 -X POST \
+            "http://100.99.99.71:8765/deploy?sha=${GITHUB_SHA}")
+          cat deploy.log
+          test "$status" = 200
+      - name: Check the deployed commit
+        run: test "$(curl -sS --max-time 30 http://100.99.99.71:8765/health)" = "${GITHUB_SHA}"
