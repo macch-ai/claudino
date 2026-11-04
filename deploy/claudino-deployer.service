@@ -1,0 +1,13 @@
+[Unit]
+Description=claudino deployer: lets CI deploy the relay over the tailnet
+After=network-online.target
+
+[Service]
+Type=simple
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/claude-relay/.venv/bin/python %h/claude-relay/deploy/deployer.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
