@@ -8,9 +8,13 @@ features:
   bot_user:
     display_name: claudino
     always_online: true
+  # Agent experience: lets claudino show a loading status in threads (assistant.threads.setStatus).
+  assistant_view:
+    assistant_description: Hands Slack threads to Claude Code on your own server.
 oauth_config:
   scopes:
     bot:
+      - assistant:write
       - channels:history
       - channels:read
       - chat:write

@@ -29,6 +29,10 @@ WORKDIR = _path("CLAUDINO_WORKDIR", "~")
 PERMISSION_MODE = _str("CLAUDINO_PERMISSION_MODE", "bypassPermissions")
 EXTRA_PATH = [os.path.expanduser(p) for p in _str("CLAUDINO_EXTRA_PATH", "~/.local/bin").split(":") if p]
 PROMPT_SUFFIX = _str("CLAUDINO_PROMPT_SUFFIX")  # appended to every relayed request, e.g. "caveman mode"
+# Thread status shown while a run works ("claudino <status>"). Haiku writes rotating lines for
+# each request; LOADING_MESSAGES ("|" separated) show until they are ready. CLAUDINO_STATUS=off hides it.
+STATUS = "" if _str("CLAUDINO_STATUS").lower() == "off" else _str("CLAUDINO_STATUS", "is working on it...")
+LOADING_MESSAGES = [part.strip() for part in _str("CLAUDINO_LOADING_MESSAGES").split("|") if part.strip()][:10] or None
 TIMEOUT_SECONDS = int(_str("CLAUDINO_TIMEOUT_SECONDS", str(50 * 60)))
 
 # Local files.
