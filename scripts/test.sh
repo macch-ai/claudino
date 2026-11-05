@@ -7,4 +7,5 @@ if [ ! -x .venv/bin/python ]; then
   uv venv -q .venv
 fi
 uv pip install -q --python .venv/bin/python -r requirements.txt
+uvx ruff@0.17.4 check .
 exec .venv/bin/python -m unittest discover -s tests -t . -v "$@"

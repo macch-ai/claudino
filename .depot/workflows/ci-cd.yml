@@ -17,6 +17,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements.txt
+      - run: pip install ruff==0.17.4 && ruff check .
       - run: python -m unittest discover -s tests -t . -v
 
   deploy:

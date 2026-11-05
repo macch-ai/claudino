@@ -15,9 +15,9 @@ Settings live in config.py.
 
 import json
 import logging
-import subprocess
 import os
 import re
+import subprocess
 import threading
 import time
 import urllib.parse
@@ -479,7 +479,6 @@ def reply_done(thread_ts: str) -> None:
 
 @app.event("message")
 def on_message(event: dict) -> None:
-    channel = event.get("channel")
     if is_sentry_alert(event):
         hand_over(event["ts"])
         return

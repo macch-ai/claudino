@@ -114,7 +114,7 @@ Manual deploy: `cd ~/claude-relay && git pull --ff-only && scripts/deploy.sh "$(
 scripts/test.sh
 ```
 
-It creates `.venv` with `uv` when missing, installs the requirements and runs the suite. Slack and Claude are faked, so tests run anywhere.
+It creates `.venv` with `uv` when missing, installs the requirements, lints with `ruff` (rules in [`ruff.toml`](ruff.toml)) and runs the suite. Slack and Claude are faked, so tests run anywhere.
 
 To check a change end to end, deploy it, mention claudino in a test channel and read the reply in the thread. Server logs: `journalctl --user -u claude-relay -n 50`.
 
