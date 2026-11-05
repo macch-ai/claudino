@@ -1,4 +1,8 @@
-# claudino
+<p align="center">
+  <img src="docs/logo.png" alt="claudino logo: an orange pixel creature with sunglasses and a cigar" width="240">
+</p>
+
+<h1 align="center">claudino</h1>
 
 **Talk to Claude Code from Slack.** Mention `@claudino` in a thread and a headless [Claude Code](https://claude.com/claude-code) session on your own server picks up the work: it reads the thread, investigates with your repositories and CLIs, opens PRs, and replies in the thread.
 
