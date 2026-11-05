@@ -309,7 +309,9 @@ class EmojiTest(RelayTest):
 
     def test_unknown_emoji_falls_back_to_eyes(self):
         self.client.reactions_add.side_effect = [SlackApiError("bad", {"error": "invalid_name"}), {"ok": True}]
-        run_now = lambda target, daemon: mock.Mock(start=target)
+        def run_now(target, daemon):
+            return mock.Mock(start=target)
+
         with mock.patch.object(self.r, "pick_emoji", return_value="not_an_emoji"), \
                 mock.patch.object(self.r.threading, "Thread", side_effect=run_now):
             self.r.ack("C1", "1.0", "hi")
