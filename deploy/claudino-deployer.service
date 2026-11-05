@@ -1,0 +1,15 @@
+[Unit]
+Description=claudino deployer: lets CI deploy the relay over a private network
+After=network-online.target
+
+[Service]
+Type=simple
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# DEPLOYER_HOST (the private address to bind) and DEPLOYER_PORT
+EnvironmentFile=-%h/.config/claude-relay/deployer.env
+ExecStart=%h/claude-relay/.venv/bin/python %h/claude-relay/deploy/deployer.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,29 @@
+# Create the Slack app from this manifest: https://api.slack.com/apps > Create New App > From a manifest.
+# Then create an app-level token with the connections:write scope (SLACK_APP_TOKEN)
+# and install the app to get the bot token (SLACK_BOT_TOKEN).
+display_information:
+  name: claudino
+  description: Hands Slack threads to Claude Code on your own server.
+features:
+  bot_user:
+    display_name: claudino
+    always_online: true
+oauth_config:
+  scopes:
+    bot:
+      - channels:history
+      - channels:read
+      - chat:write
+      - emoji:read
+      - files:read
+      - im:write
+      - reactions:read
+      - reactions:write
+settings:
+  event_subscriptions:
+    bot_events:
+      - message.channels
+      - reaction_added
+  socket_mode_enabled: true
+  org_deploy_enabled: false
+  token_rotation_enabled: false

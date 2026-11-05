@@ -1,0 +1,117 @@
+# claudino
+
+**Talk to Claude Code from Slack.** Mention `@claudino` in a thread and a headless [Claude Code](https://claude.com/claude-code) session on your own server picks up the work: it reads the thread, investigates with your repositories and CLIs, opens PRs, and replies in the thread.
+
+- **One session per thread.** Every new message in the thread resumes the same Claude Code session, so context carries over.
+- **No mention needed once it's in.** After claudino takes part in a thread, teammates' replies reach it unless they mention someone else.
+- **Never duplicates work.** Messages sent while a run is working are queued and handled together by the next run.
+- **Files and forwards.** Images, files and forwarded messages in the thread are downloaded and handed to the session.
+- **Instant feedback.** Every request gets an emoji reaction picked by Claude Haiku, with `:eyes:` as fallback.
+- **Sentry alerts (optional).** New top-level Sentry alerts in a channel fire a [Claude Code routine](https://docs.claude.com/en/docs/claude-code) that investigates and replies in the alert thread.
+- **Allowlist.** Only the Slack users you list can start runs.
+
+It is ~600 lines of Python with two dependencies (`slack_bolt`, `slack_sdk`).
+
+## How it works
+
+```mermaid
+flowchart LR
+    S[Slack] -- Socket Mode events --> R[relay.py]
+    R -- "claude -p --resume (one session per thread)" --> C[Claude Code on your server]
+    C -- final answer --> R -- chat.postMessage --> S
+    R -- new Sentry alert --> F[fire_claude.py] -- POST /fire --> RT[Claude Code routine]
+```
+
+| File | Role |
+| --- | --- |
+| [`relay.py`](relay.py) | Slack Socket Mode app: routing, allowlist, queue, reactions, files, posting answers |
+| [`claude_cli.py`](claude_cli.py) | Runs `claude -p` per thread and remembers each thread's session |
+| [`config.py`](config.py) | Every setting, read from the environment |
+| [`claudino_instructions.md`](claudino_instructions.md) | System prompt appended to every session |
+| [`fire_claude.py`](fire_claude.py) | Fires the alert routine through its API trigger |
+| [`deploy/`](deploy) | systemd units and the optional CI deployer |
+| [`scripts/`](scripts) | `test.sh`, `set-tokens.sh`, `deploy.sh` |
+
+## Quick start
+
+You need a Linux server with systemd, Python 3.11+, [`uv`](https://docs.astral.sh/uv/), and the [Claude Code CLI](https://docs.claude.com/en/docs/claude-code/setup) logged in (`claude auth status`).
+
+1. **Create the Slack app** from [`slack-app-manifest.yml`](slack-app-manifest.yml) (Create New App > From a manifest). Create an app-level token with `connections:write`, then install the app to your workspace.
+2. **Install claudino** on the server:
+   ```bash
+   git clone https://github.com/macch-ai/claudino ~/claude-relay
+   cd ~/claude-relay
+   uv venv .venv && uv pip install --python .venv/bin/python -r requirements.txt
+   ```
+3. **Configure it.** Copy [`.env.example`](.env.example) to `~/.config/claude-relay/env` and set at least `CLAUDINO_ALLOWED_USERS` and `CLAUDINO_WORKDIR`. Then store the Slack tokens (hidden input, keeps your other settings):
+   ```bash
+   mkdir -p ~/.config/claude-relay && install -m 600 .env.example ~/.config/claude-relay/env
+   ```
+   ```bash
+   scripts/set-tokens.sh
+   ```
+4. **Start it:**
+   ```bash
+   cp deploy/claude-relay.service ~/.config/systemd/user/
+   systemctl --user daemon-reload && systemctl --user enable --now claude-relay
+   loginctl enable-linger "$USER"
+   ```
+5. **Invite `@claudino`** to a channel and mention it. Logs: `journalctl --user -u claude-relay -f`.
+
+## Configuration
+
+All settings live in `~/.config/claude-relay/env`. [`.env.example`](.env.example) documents each one.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SLACK_APP_TOKEN`, `SLACK_BOT_TOKEN` | required | Slack tokens (`scripts/set-tokens.sh`) |
+| `CLAUDINO_ALLOWED_USERS` | empty: nobody | Slack user IDs allowed to start runs |
+| `CLAUDINO_WORKDIR` | `~` | Where sessions start |
+| `CLAUDINO_PERMISSION_MODE` | `bypassPermissions` | `bypassPermissions` runs `--dangerously-skip-permissions`; anything else goes to `--permission-mode` |
+| `CLAUDINO_EXTRA_PATH` | `~/.local/bin` | Extra `PATH` entries for sessions |
+| `CLAUDINO_PROMPT_SUFFIX` | empty | Text appended to every relayed request |
+| `CLAUDINO_TIMEOUT_SECONDS` | `3000` | Kill a run after this long |
+| `CLAUDINO_ALERT_*`, `CLAUDINO_CLAUDE_APP_USER` | empty: off | Sentry alert hand-over, see below |
+
+**Private instructions.** Anything in `~/.config/claude-relay/instructions.md` is appended to the system prompt. Put your team's specifics there (repositories, CLIs, people, PR labels) so they stay out of this repo.
+
+### Sentry alerts (optional)
+
+Set all three to turn it on: `CLAUDINO_ALERT_CHANNEL` (where Sentry posts), `CLAUDINO_ALERT_BOT_USER` (the Sentry app's user ID) and `CLAUDINO_ALERT_ROUTINE_URL` (your routine's `/fire` endpoint). Put the routine's API token in `~/.config/claude-alert-fire/token`. On start, claudino catches up on alerts from the last 24 hours it missed.
+
+## Security
+
+> [!WARNING]
+> By default claudino runs Claude Code with `--dangerously-skip-permissions`: **any command can run on the server without approval.**
+
+- `CLAUDINO_ALLOWED_USERS` limits **who can start a run**, not **what the thread contains**. Everything in the thread goes into the prompt: other people's messages, forwarded messages, files, and Sentry alert text written by whoever triggered the error. Treat this as a prompt injection path to a shell.
+- Run claudino as a dedicated, unprivileged user on a machine you can afford to rebuild. Give that user only the credentials the agent truly needs.
+- Want approvals instead? Set `CLAUDINO_PERMISSION_MODE=auto` (or `acceptEdits`, `default`). Blocked actions are reported back in the thread.
+- Slack tokens are never passed to sessions: `claude_cli._env()` strips every `SLACK_*` variable.
+
+## Deploying from CI (optional)
+
+[`.depot/workflows/ci-cd.yml`](.depot/workflows/ci-cd.yml) runs the tests on every pull request and push. With a deploy target configured, every merge to `main` also deploys:
+
+1. The deploy job joins your tailnet ([Tailscale OAuth client](https://tailscale.com/kb/1215/oauth-clients) in the CI secrets `TS_OAUTH_CLIENT_ID` / `TS_OAUTH_SECRET`).
+2. It calls `POST $DEPLOY_URL/deploy?sha=<commit>` on [`deploy/deployer.py`](deploy/deployer.py), a tiny service bound to a private address. Its only action: fast-forward the checkout to `origin/main` (refusing any other commit) and run [`scripts/deploy.sh`](scripts/deploy.sh).
+3. `deploy.sh` installs requirements, runs the tests, refreshes the systemd unit, restarts the relay and checks it reconnected to Slack. If any step fails it rolls back to the previous commit.
+4. The job checks `GET $DEPLOY_URL/health` reports the merged commit.
+
+To set it up, put `DEPLOYER_HOST=<private IP>` in `~/.config/claude-relay/deployer.env`, install and start `deploy/claudino-deployer.service`, and set the CI variable `DEPLOY_URL` (for example `http://100.x.y.z:8765`). Without `DEPLOY_URL` the deploy job is skipped, so forks just run the tests.
+
+Manual deploy: `cd ~/claude-relay && git pull --ff-only && scripts/deploy.sh "$(git rev-parse HEAD@{1})"`.
+
+## Development
+
+```bash
+scripts/test.sh
+```
+
+It creates `.venv` with `uv` when missing, installs the requirements and runs the suite. Slack and Claude are faked, so tests run anywhere.
+
+To check a change end to end, deploy it, mention claudino in a test channel and read the reply in the thread. Server logs: `journalctl --user -u claude-relay -n 50`.
+
+## License
+
+[MIT](LICENSE)
