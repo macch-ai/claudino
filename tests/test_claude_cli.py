@@ -11,7 +11,8 @@ class ClaudeCliTest(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        patcher = mock.patch.object(claude_cli, "STATE_FILE", Path(tmp.name) / "sessions.json")
+        self.tmp = tmp.name
+        patcher = mock.patch.object(claude_cli, "SESSIONS_FILE", Path(tmp.name) / "sessions.json")
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -33,12 +34,35 @@ class ClaudeCliTest(unittest.TestCase):
             claude_cli.run("k", "prompt")
         claude.assert_called_once_with("prompt", "S1")
 
-    def test_prompt_asks_for_caveman_mode(self):
+    def claude_cmd(self, **settings):
         proc = mock.Mock(stdout='{"result": "ok"}', returncode=0)
-        with mock.patch.object(claude_cli.subprocess, "run", return_value=proc) as run:
+        with mock.patch.multiple(claude_cli.config, **settings), \
+                mock.patch.object(claude_cli.subprocess, "run", return_value=proc) as run:
             claude_cli._claude("prompt", None)
-        cmd = run.call_args.args[0]
+        return run.call_args.args[0]
+
+    def test_permission_checks_are_skipped_by_default(self):
+        cmd = self.claude_cmd(PERMISSION_MODE="bypassPermissions", PROMPT_SUFFIX="")
+        self.assertIn("--dangerously-skip-permissions", cmd)
+        self.assertNotIn("--permission-mode", cmd)
+        self.assertEqual(cmd[cmd.index("-p") + 1], "prompt")
+
+    def test_other_permission_modes_are_passed_through(self):
+        cmd = self.claude_cmd(PERMISSION_MODE="auto")
+        self.assertEqual(cmd[cmd.index("--permission-mode") + 1], "auto")
+        self.assertNotIn("--dangerously-skip-permissions", cmd)
+
+    def test_prompt_suffix_is_appended(self):
+        cmd = self.claude_cmd(PROMPT_SUFFIX="caveman mode")
         self.assertEqual(cmd[cmd.index("-p") + 1], "prompt\n\ncaveman mode")
+
+    def test_local_instructions_are_appended(self):
+        local = Path(self.tmp) / "instructions.md"
+        local.write_text("Private note.")
+        cmd = self.claude_cmd(LOCAL_INSTRUCTIONS_FILE=local)
+        prompt = cmd[cmd.index("--append-system-prompt") + 1]
+        self.assertTrue(prompt.startswith("You are claudino"))
+        self.assertTrue(prompt.endswith("Private note."))
 
     def test_failed_resume_resets_the_thread(self):
         claude_cli.update("k", session_id="S1", seen_ts="9.0")

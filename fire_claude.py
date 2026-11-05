@@ -1,28 +1,29 @@
-"""Fire the Claude Code scheduled task that handles one Sentry alert."""
-import json, sys, urllib.request
-from pathlib import Path
+"""Fire the Claude Code routine that handles one Sentry alert.
 
-from claude_cli import CAVEMAN
+Usage: python fire_claude.py <alert_ts>
+"""
 
-FIRE_URL = "https://api.anthropic.com/v1/claude_code/routines/trig_01YFZ9tPxQGx7r31fmmKLAgi/fire"
-TOKEN_FILE = Path.home() / ".config/claude-alert-fire/token"
-CHANNEL_ID = "C0C7YJPATEK"
+import json
+import sys
+import urllib.request
+
+import config
 
 
 def fire(ts: str, extra: str = "") -> str:
-    text = (f"alert_ts={ts}\nchannel={CHANNEL_ID}\n"
-            "A new Sentry alert was posted at the top level of #production-errors. "
+    text = (f"alert_ts={ts}\nchannel={config.ALERT_CHANNEL}\n"
+            "A new Sentry alert was posted at the top level of the alerts channel. "
             "Read it and its thread with the Slack connector.")
-    text += extra
-    return fire_text(text)
+    return fire_text(text + extra)
 
 
 def fire_text(text: str) -> str:
+    """POST text to the routine's /fire endpoint; returns the new session's URL."""
     req = urllib.request.Request(
-        FIRE_URL,
-        data=json.dumps({"text": text + CAVEMAN}).encode(),
+        config.ALERT_ROUTINE_URL,
+        data=json.dumps({"text": config.with_suffix(text)}).encode(),
         headers={
-            "Authorization": "Bearer " + TOKEN_FILE.read_text().strip(),
+            "Authorization": "Bearer " + config.ALERT_TOKEN_FILE.read_text().strip(),
             "anthropic-beta": "experimental-cc-routine-2026-04-01",
             "anthropic-version": "2023-06-01",
             "Content-Type": "application/json",

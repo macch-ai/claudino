@@ -1,9 +1,10 @@
-"""claudino deployer: lets CI deploy the relay on hermes over the tailnet.
+"""claudino deployer: lets CI deploy the relay on its server over a private network.
 
 POST /deploy?sha=<commit> fast-forwards ~/claude-relay to origin/main, checks that it is
 <commit>, then runs scripts/deploy.sh (install, test, restart, verify, roll back on failure).
-GET /health returns the deployed commit. It listens only on hermes' Tailscale address and
-runs one deploy at a time; the only thing it can do is deploy what is on origin/main.
+GET /health returns the deployed commit. Bind it only to a private address (DEPLOYER_HOST,
+for example the server's Tailscale IP); it runs one deploy at a time and the only thing it
+can do is deploy what is on origin/main.
 """
 
 import os
@@ -14,7 +15,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 REPO = Path(os.environ.get("CLAUDINO_REPO", Path.home() / "claude-relay"))
-HOST = os.environ.get("DEPLOYER_HOST", "100.99.99.71")
+HOST = os.environ.get("DEPLOYER_HOST", "127.0.0.1")
 PORT = int(os.environ.get("DEPLOYER_PORT", "8765"))
 
 lock = threading.Lock()
@@ -37,7 +38,7 @@ def deploy(sha: str) -> tuple[int, str]:
         previous = git("rev-parse", "HEAD").stdout.strip()
         merge = git("merge", "--ff-only", "--quiet", "origin/main")
         if merge.returncode:
-            return 500, "fast-forward failed (local changes on hermes?): " + merge.stderr
+            return 500, "fast-forward failed (local changes on the server?): " + merge.stderr
         run = subprocess.run([str(REPO / "scripts/deploy.sh"), previous], cwd=REPO,
                              capture_output=True, text=True, timeout=600)
         return (200 if run.returncode == 0 else 500), run.stdout[-4000:] + run.stderr[-2000:]

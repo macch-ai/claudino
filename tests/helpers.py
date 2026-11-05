@@ -5,13 +5,13 @@ import sys
 import types
 from unittest import mock
 
-RELAY_USER_ID = "URELAY"
+RELAY_USER_ID, RELAY_BOT_ID = "URELAY", "BRELAY"
 
 
 def load_relay():
     os.environ.setdefault("SLACK_BOT_TOKEN", "xoxb-test")
     fake_app = mock.MagicMock()
-    fake_app.client.auth_test.return_value = {"user_id": RELAY_USER_ID}
+    fake_app.client.auth_test.return_value = {"user_id": RELAY_USER_ID, "bot_id": RELAY_BOT_ID}
     fake_app.event = lambda name: (lambda handler: handler)
     bolt = types.ModuleType("slack_bolt")
     bolt.App = mock.MagicMock(return_value=fake_app)

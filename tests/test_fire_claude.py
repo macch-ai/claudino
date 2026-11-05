@@ -13,7 +13,8 @@ class FireTest(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         token = Path(tmp.name) / "token"
         token.write_text("tok\n")
-        patcher = mock.patch.object(fire_claude, "TOKEN_FILE", token)
+        patcher = mock.patch.multiple(fire_claude.config, ALERT_TOKEN_FILE=token, ALERT_CHANNEL="CALERTS",
+                                      ALERT_ROUTINE_URL="https://example.test/fire", PROMPT_SUFFIX="")
         patcher.start()
         self.addCleanup(patcher.stop)
         response = mock.MagicMock()
@@ -30,12 +31,19 @@ class FireTest(unittest.TestCase):
         request, text = self.sent()
         self.assertEqual(url, "https://claude.ai/code/x")
         self.assertIn("alert_ts=1.2", text)
-        self.assertTrue(text.endswith("followup_ts=3.4\n\ncaveman mode"))
+        self.assertIn("channel=CALERTS", text)
+        self.assertTrue(text.endswith("followup_ts=3.4"))
         self.assertEqual(request.get_header("Authorization"), "Bearer tok")
-        self.assertEqual(request.get_full_url(), fire_claude.FIRE_URL)
+        self.assertEqual(request.get_full_url(), "https://example.test/fire")
 
-    def test_fire_text_sends_the_text_with_caveman_mode(self):
+    def test_fire_text_sends_the_text_as_is(self):
         fire_claude.fire_text("mention_ts=9.9")
+        _, text = self.sent()
+        self.assertEqual(text, "mention_ts=9.9")
+
+    def test_prompt_suffix_is_appended(self):
+        with mock.patch.object(fire_claude.config, "PROMPT_SUFFIX", "caveman mode"):
+            fire_claude.fire_text("mention_ts=9.9")
         _, text = self.sent()
         self.assertEqual(text, "mention_ts=9.9\n\ncaveman mode")
 

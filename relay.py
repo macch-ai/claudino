@@ -1,14 +1,15 @@
-"""claudino: Slack relay that hands work to Claude Code on hermes.
+"""claudino: Slack relay that hands work to Claude Code on your own server.
 
-- New top-level Sentry alerts in #production-errors start the alert task.
+- New top-level Sentry alerts in the alert channel fire a Claude Code routine (optional).
 - A message that mentions @claudino in any public channel it belongs to starts a
   mention run. In a thread where claudino already took part, teammates' replies
   don't need the mention (unless they mention someone else instead).
 - While a run for a thread is working, new requests there are queued and handled
   together by one next run once claudino replies, so work is never duplicated.
-- Each request gets an :eyes: reaction as soon as it is seen.
+- Each request gets an emoji reaction as soon as it is seen.
 
 On start it catches up on Sentry alerts posted since the last one it saw.
+Settings live in config.py.
 """
 
 import json
@@ -19,29 +20,26 @@ import re
 import threading
 import time
 import urllib.request
-from pathlib import Path
 
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk.errors import SlackApiError
 
 import claude_cli
+import config
 import fire_claude
 
-CHANNEL_ID = "C0C7YJPATEK"  # #production-errors
-SENTRY_USER_ID = "U0C8J4GER8W"  # Sentry app's bot user
-CLAUDE_USER_ID = "U0C9799P96K"  # Claude (Claude Tag) app; mentions in #production-errors count too
-RELAY_APP_ID = "A0CARJB2Q2C"  # claudino
-ALLOWED_USERS = {"U0C5CGDBP8E", "U0C68RT2SEL"}  # Facundo, Salvador
 MAX_CATCH_UP_SECONDS = 24 * 60 * 60  # never replay more than 1 day after an outage
 BUSY_TIMEOUT_SECONDS = 60 * 60  # a run that never replied stops blocking its thread
-STATE_FILE = Path.home() / ".local/state/claude-relay/last_alert_ts"
+LAST_ALERT_FILE = config.STATE_DIR / "last_alert_ts"
+FILES_DIR = config.STATE_DIR / "files"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("claude-relay")
 
 app = App(token=os.environ["SLACK_BOT_TOKEN"], ignoring_self_events_enabled=False)
-RELAY_USER_ID = app.client.auth_test()["user_id"]
+_me = app.client.auth_test()
+RELAY_USER_ID, RELAY_BOT_ID = _me["user_id"], _me.get("bot_id")
 
 lock = threading.Lock()
 busy = {}  # thread_ts -> {"since": float, "channel": str, "pending": [(ts, user)]}
@@ -49,18 +47,19 @@ active_threads = set()  # (channel, thread_ts) where claudino took part
 
 
 def is_sentry_alert(message: dict) -> bool:
-    """A top-level message posted by the Sentry app."""
+    """A top-level message posted by the Sentry app in the alert channel."""
     is_reply = message.get("thread_ts") not in (None, message.get("ts"))
-    return message.get("user") == SENTRY_USER_ID and not is_reply
+    return (config.alerts_enabled() and message.get("user") == config.ALERT_BOT_USER
+            and message.get("channel", config.ALERT_CHANNEL) == config.ALERT_CHANNEL and not is_reply)
 
 
 def already_handed_over(ts: str) -> bool:
     """Claude already took the alert or someone already mentioned it in the thread."""
-    replies = app.client.conversations_replies(channel=CHANNEL_ID, ts=ts, limit=50)["messages"]
+    replies = app.client.conversations_replies(channel=config.ALERT_CHANNEL, ts=ts, limit=50)["messages"]
     parent, thread = replies[0], replies[1:]
     if any(r.get("name") == "eyes" and RELAY_USER_ID in r.get("users", []) for r in parent.get("reactions") or []):
         return True
-    return any(m.get("user") in (RELAY_USER_ID, CLAUDE_USER_ID) for m in thread)
+    return any(m.get("user") and m.get("user") in (RELAY_USER_ID, config.CLAUDE_APP_USER) for m in thread)
 
 
 def hand_over(ts: str) -> None:
@@ -69,7 +68,7 @@ def hand_over(ts: str) -> None:
             log.info("skip %s: already handed over", ts)
             remember(ts)
             return
-        active_threads.add((CHANNEL_ID, ts))
+        active_threads.add((config.ALERT_CHANNEL, ts))
         url = fire_claude.fire(ts)
         log.info("fired Claude task for %s: %s", ts, url)
         remember(ts)
@@ -80,7 +79,7 @@ def hand_over(ts: str) -> None:
 
 
 def is_from_claudino(message: dict) -> bool:
-    return message.get("user") == RELAY_USER_ID or message.get("app_id") == RELAY_APP_ID
+    return message.get("user") == RELAY_USER_ID or (RELAY_BOT_ID is not None and message.get("bot_id") == RELAY_BOT_ID)
 
 
 def claudino_in_thread(channel: str, thread_ts: str) -> bool:
@@ -102,24 +101,19 @@ def addressed_to_claudino(message: dict) -> bool:
     channel = message.get("channel")
     if f"<@{RELAY_USER_ID}>" in text:
         return True
-    if channel == CHANNEL_ID and f"<@{CLAUDE_USER_ID}>" in text:
+    if config.CLAUDE_APP_USER and channel == config.ALERT_CHANNEL and f"<@{config.CLAUDE_APP_USER}>" in text:
         return True
     thread_ts = message.get("thread_ts")
     if not thread_ts or thread_ts == message.get("ts"):
         return False
-    others = set(re.findall(r"<@([UW][A-Z0-9]+)", text)) - {RELAY_USER_ID, CLAUDE_USER_ID}
+    others = set(re.findall(r"<@([UW][A-Z0-9]+)", text)) - {RELAY_USER_ID, config.CLAUDE_APP_USER}
     if others:
         return False  # talking to someone else ("Sent using @Claude" footers don't count)
     return claudino_in_thread(channel, thread_ts)
 
 
-def thread_is_alert(thread_ts: str) -> bool:
-    parent = app.client.conversations_replies(channel=CHANNEL_ID, ts=thread_ts, limit=1)["messages"][0]
-    return is_sentry_alert(parent)
-
-
 EMOJI_PROMPT = (
-    "You are claudino, an engineering assistant in Macch's Slack. A teammate just sent you the message below. "
+    "You are claudino, an engineering assistant in this Slack workspace. A teammate just sent you the message below. "
     "Pick the one Slack emoji reaction a thoughtful teammate would add to show they saw it and how it lands "
     "(for example: eyes, saluting_face, rocket, fire, rotating_light, thinking_face, mag, ok_hand, muscle, "
     "white_check_mark, pray, joy, sweat_smile, hammer_and_wrench, chart_with_upwards_trend, coffee). "
@@ -209,9 +203,6 @@ def start(channel: str, thread_ts: str, requests: list) -> None:
     threading.Thread(target=work, args=(channel, thread_ts, requests), daemon=True).start()
 
 
-FILES_DIR = Path.home() / ".local/state/claude-relay/files"
-
-
 def file_note(f: dict, ts: str) -> str:
     """Download a Slack file for the session and say where it is."""
     try:
@@ -298,10 +289,10 @@ def work(channel: str, thread_ts: str, requests: list) -> None:
                 if attempt:
                     raise
                 log.warning("session %s failed, retrying with a new one: %s", key, error)
-        post(channel, thread_ts, answer or f"{requesters} la sesin termin sin respuesta.")
+        post(channel, thread_ts, answer or f"{requesters} the Claude session ended without an answer.")
     except Exception as error:
         log.error("session %s failed: %s", key, error)
-        post(channel, thread_ts, f"{requesters} fall la sesin de Claude en hermes: `{str(error)[:300]}`")
+        post(channel, thread_ts, f"{requesters} the Claude session failed: `{str(error)[:300]}`")
 
 
 def reply_done(thread_ts: str) -> None:
@@ -324,7 +315,7 @@ def reply_done(thread_ts: str) -> None:
 @app.event("message")
 def on_message(event: dict) -> None:
     channel = event.get("channel")
-    if channel == CHANNEL_ID and is_sentry_alert(event):
+    if is_sentry_alert(event):
         hand_over(event["ts"])
         return
     if is_from_claudino(event):
@@ -335,7 +326,7 @@ def on_message(event: dict) -> None:
         return
     if not addressed_to_claudino(event):
         return
-    if event["user"] not in ALLOWED_USERS:
+    if event["user"] not in config.ALLOWED_USERS:
         log.info("skip %s from %s: not allowed", event.get("ts"), event.get("user"))
         return
     dispatch(event)
@@ -343,26 +334,31 @@ def on_message(event: dict) -> None:
 
 @app.event("reaction_added")
 def on_reaction(event: dict) -> None:
-    pass
+    """Acknowledge the event so Bolt does not log it as unhandled."""
 
 
 def remember(ts: str) -> None:
-    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    if not STATE_FILE.exists() or float(ts) > float(STATE_FILE.read_text()):
-        STATE_FILE.write_text(ts)
+    LAST_ALERT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    if not LAST_ALERT_FILE.exists() or float(ts) > float(LAST_ALERT_FILE.read_text()):
+        LAST_ALERT_FILE.write_text(ts)
 
 
 def catch_up() -> None:
-    if not STATE_FILE.exists():
+    if not config.alerts_enabled():
+        return
+    if not LAST_ALERT_FILE.exists():
         remember(str(time.time()))
         return
-    oldest = str(max(float(STATE_FILE.read_text()), time.time() - MAX_CATCH_UP_SECONDS))
-    history = app.client.conversations_history(channel=CHANNEL_ID, oldest=oldest, limit=200)["messages"]
+    oldest = str(max(float(LAST_ALERT_FILE.read_text()), time.time() - MAX_CATCH_UP_SECONDS))
+    history = app.client.conversations_history(channel=config.ALERT_CHANNEL, oldest=oldest, limit=200)["messages"]
     for message in reversed(history):
         if is_sentry_alert(message) and message["ts"] != oldest:
             hand_over(message["ts"])
 
 
 if __name__ == "__main__":
+    if not config.ALLOWED_USERS:
+        log.warning("CLAUDINO_ALLOWED_USERS is empty: claudino will ignore every message")
+    log.info("alerts %s, permission mode %s", "on" if config.alerts_enabled() else "off", config.PERMISSION_MODE)
     catch_up()
     SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"]).start()

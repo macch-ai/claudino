@@ -20,12 +20,13 @@ jobs:
       - run: python -m unittest discover -s tests -t . -v
 
   deploy:
-    # Every merge to main deploys to hermes through its tailnet-only deploy endpoint.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Every merge to main deploys through the deployer's private endpoint.
+    # Needs the DEPLOY_URL variable and the TS_OAUTH_* secrets; forks without them skip it.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DEPLOY_URL != ''
     needs: test
     runs-on: depot-ubuntu-24.04
     concurrency:
-      group: deploy-hermes
+      group: deploy
       cancel-in-progress: false
     steps:
       - name: Join the tailnet
@@ -34,11 +35,15 @@ jobs:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
-      - name: Deploy to hermes
+      - name: Deploy
+        env:
+          DEPLOY_URL: ${{ vars.DEPLOY_URL }}
         run: |
           status=$(curl -sS -o deploy.log -w '%{http_code}' --max-time 600 -X POST \
-            "http://100.99.99.71:8765/deploy?sha=${GITHUB_SHA}")
+            "${DEPLOY_URL}/deploy?sha=${GITHUB_SHA}")
           cat deploy.log
           test "$status" = 200
       - name: Check the deployed commit
-        run: test "$(curl -sS --max-time 30 http://100.99.99.71:8765/health)" = "${GITHUB_SHA}"
+        env:
+          DEPLOY_URL: ${{ vars.DEPLOY_URL }}
+        run: test "$(curl -sS --max-time 30 "${DEPLOY_URL}/health")" = "${GITHUB_SHA}"

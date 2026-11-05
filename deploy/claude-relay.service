@@ -1,5 +1,5 @@
 [Unit]
-Description=Claude relay: hand Sentry alerts in #production-errors to Claude
+Description=claudino: Slack relay to Claude Code
 After=network-online.target
 
 [Service]

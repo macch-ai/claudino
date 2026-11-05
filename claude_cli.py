@@ -1,4 +1,4 @@
-"""Run Claude Code headless on hermes (auto permission mode): one resumable session per Slack thread."""
+"""Run Claude Code headless: one resumable session per Slack thread."""
 
 import json
 import os
@@ -6,18 +6,16 @@ import subprocess
 import threading
 from pathlib import Path
 
-WORKDIR = Path.home() / "code"
-STATE_FILE = Path.home() / ".local/state/claude-relay/sessions.json"
+import config
+
+SESSIONS_FILE = config.STATE_DIR / "sessions.json"
 INSTRUCTIONS_FILE = Path(__file__).with_name("claudino_instructions.md")
-TIMEOUT_SECONDS = 50 * 60
-CAVEMAN = "\n\ncaveman mode"  # every relayed request asks Claude Code for caveman mode
-EXTRA_PATH = [str(Path.home() / ".local/bin"), str(Path.home() / ".nvm/versions/node/v24.13.0/bin")]
 
 _lock = threading.Lock()
 
 
 def _load() -> dict:
-    return json.loads(STATE_FILE.read_text()) if STATE_FILE.exists() else {}
+    return json.loads(SESSIONS_FILE.read_text()) if SESSIONS_FILE.exists() else {}
 
 
 def get(key: str) -> dict:
@@ -29,22 +27,38 @@ def update(key: str, **values) -> None:
     with _lock:
         data = _load()
         data.setdefault(key, {}).update(values)
-        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        STATE_FILE.write_text(json.dumps(data, indent=1))
+        SESSIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        SESSIONS_FILE.write_text(json.dumps(data, indent=1))
 
 
 def _env() -> dict:
     env = {k: v for k, v in os.environ.items() if not k.startswith("SLACK_")}
-    env["PATH"] = ":".join(EXTRA_PATH + [env.get("PATH", "/usr/bin:/bin")])
+    env["PATH"] = ":".join(config.EXTRA_PATH + [env.get("PATH", "/usr/bin:/bin")])
     return env
 
 
+def permission_args() -> list:
+    """bypassPermissions (the default) skips every permission check; any other mode is passed through."""
+    if config.PERMISSION_MODE == "bypassPermissions":
+        return ["--dangerously-skip-permissions"]
+    return ["--permission-mode", config.PERMISSION_MODE]
+
+
+def instructions() -> str:
+    """The shared system prompt plus this machine's private additions, when there are any."""
+    text = INSTRUCTIONS_FILE.read_text()
+    if config.LOCAL_INSTRUCTIONS_FILE.exists():
+        text += "\n" + config.LOCAL_INSTRUCTIONS_FILE.read_text()
+    return text
+
+
 def _claude(prompt: str, session_id: str | None) -> dict:
-    cmd = ["claude", "-p", prompt + CAVEMAN, "--output-format", "json", "--permission-mode", "auto",
-           "--append-system-prompt", INSTRUCTIONS_FILE.read_text()]
+    cmd = ["claude", "-p", config.with_suffix(prompt), "--output-format", "json", *permission_args(),
+           "--append-system-prompt", instructions()]
     if session_id:
         cmd += ["--resume", session_id]
-    proc = subprocess.run(cmd, cwd=WORKDIR, env=_env(), capture_output=True, text=True, timeout=TIMEOUT_SECONDS)
+    proc = subprocess.run(cmd, cwd=config.WORKDIR, env=_env(), capture_output=True, text=True,
+                          timeout=config.TIMEOUT_SECONDS)
     try:
         return json.loads(proc.stdout)
     except json.JSONDecodeError:
