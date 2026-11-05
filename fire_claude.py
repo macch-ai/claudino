@@ -2,10 +2,11 @@
 import json, sys, urllib.request
 from pathlib import Path
 
+from claude_cli import CAVEMAN
+
 FIRE_URL = "https://api.anthropic.com/v1/claude_code/routines/trig_01YFZ9tPxQGx7r31fmmKLAgi/fire"
 TOKEN_FILE = Path.home() / ".config/claude-alert-fire/token"
 CHANNEL_ID = "C0C7YJPATEK"
-CAVEMAN = "\n\ncaveman mode"  # every relayed request asks Claude Code for caveman mode
 
 
 def fire(ts: str, extra: str = "") -> str:

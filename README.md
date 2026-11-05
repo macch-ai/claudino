@@ -22,6 +22,7 @@ Slack relay that hands Macch's engineering work to Claude Code on **hermes**.
 
 ## Configuration on hermes (never committed)
 
+- SSH: `facundo@hermes` over Tailscale SSH. The tailnet policy refuses other users.
 - Slack tokens: `~/.config/claude-relay/env` (`SLACK_APP_TOKEN`, `SLACK_BOT_TOKEN`), written by `scripts/set-tokens.sh`.
 - Alert task API token: `~/.config/claude-alert-fire/token`.
 - State: `~/.local/state/claude-relay/` (last alert seen, thread sessions, downloaded files).
@@ -48,7 +49,13 @@ Changes to `deploy/deployer.py` itself take effect after `systemctl --user resta
 ## Tests
 
 ```sh
-python -m unittest discover -s tests -t . -v
+scripts/test.sh
 ```
 
-Slack and Claude are faked, so tests run anywhere with the requirements installed.
+It creates `.venv` with `uv` when missing, installs the requirements and runs `python -m unittest discover -s tests -t . -v`. Slack and Claude are faked, so tests run anywhere.
+
+## Testing in Slack
+
+- claudino's Slack user ID: `U0CARJPDVEU` (mention it as `<@U0CARJPDVEU>`).
+- Test channel: `#hostgator-facundo-vps` (`C0CB808BPE3`). claudino is a member.
+- After a deploy, mention claudino there and read its reply in the thread. Logs: `ssh hermes journalctl --user -u claude-relay -n 50`.
