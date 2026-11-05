@@ -1,5 +1,5 @@
 // claudino desktop: menu bar app that runs this teammate's Slack requests with their own Claude login.
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell, Tray } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, shell, Tray } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { ask, authStatus, logout } from "./claude";
@@ -10,11 +10,11 @@ let tray: Tray | null = null;
 let win: BrowserWindow | null = null;
 
 const TOOLTIPS = {
-  "no-config": "MACCH: sin configurar",
-  connecting: "MACCH: conectando con hermes…",
-  connected: "MACCH: conectada a hermes",
-  denied: "MACCH: token rechazado",
-  offline: "MACCH: sin conexión con hermes",
+  "no-config": "MACCH Agent: sin configurar",
+  connecting: "MACCH Agent: conectando…",
+  connected: "MACCH Agent: conectada",
+  denied: "MACCH Agent: token rechazado",
+  offline: "MACCH Agent: sin conexión",
 } as const;
 
 function hubState() {
@@ -28,7 +28,9 @@ function send(channel: string, data: unknown): void {
 }
 
 function automationsState() {
-  return automations.load().map((a) => ({ ...a, nextRunAt: a.enabled ? automations.nextRun(a) : null }));
+  return automations.load().map((a) => ({
+    ...a, nextRunAt: a.enabled ? automations.nextRun(a) : null, running: scheduler.isRunning(a.id),
+  }));
 }
 
 const scheduler = new automations.Scheduler(
@@ -37,14 +39,10 @@ const scheduler = new automations.Scheduler(
     work.finally(() => send("automations:state", automationsState())).catch(() => undefined);
     send("automations:state", automationsState());
   },
-  (a, r) => {
-    if (!hub.post(a.channel!, a.name, r.result || "(sin respuesta)")) {
-      console.warn(`automation ${a.name}: not connected to hermes, result not posted to Slack`);
-    }
-  },
+  (a, r) => hub.post({ dm: a.dm !== false, channel: a.channel }, a.name, r.result || "(sin respuesta)"),
 );
 
-// Slack "@claudino ejecutá <name>": hermes asks this Mac to run one of its automations.
+// Slack "@Machine AI ejecutá <name>": the Worker asks this Mac to run one of its automations.
 function runFromSlack(name: string) {
   const a = automations.findByName(name);
   if (!a) return Promise.reject(new Error(`no hay ninguna automatización llamada "${name}" en esta Mac`));
@@ -82,6 +80,8 @@ function showWindow(): void {
   if (shot) {
     win.webContents.once("did-finish-load", async () => {
       if (page) await win!.webContents.executeJavaScript(`document.querySelector('[data-page="${page.replace(/\W/g, "")}"]').click()`);
+      const theme = process.env.CLAUDINO_SCREENSHOT_THEME; // dark|light|retro|system
+      if (theme) await win!.webContents.executeJavaScript(`document.querySelector('input[name="theme"][value="${theme.replace(/\W/g, "")}"]').click()`);
       const delay = Number(process.env.CLAUDINO_SCREENSHOT_DELAY_MS) || 2500;
       setTimeout(async () => fs.writeFileSync(shot, (await win!.webContents.capturePage()).toPNG()), delay);
     });
@@ -110,6 +110,11 @@ ipcMain.handle("automations:delete", (_e, id: string) => {
   automations.remove(id);
   return automationsState();
 });
+ipcMain.handle("automations:run", (_e, id: string) => {
+  const a = automations.load().find((x) => x.id === id);
+  if (a) scheduler.runManually(a);
+  return automationsState();
+});
 
 ipcMain.handle("claude:auth", () => authStatus());
 ipcMain.handle("claude:ask", (_e, prompt: string) => ask(prompt));
@@ -120,7 +125,7 @@ ipcMain.handle("claude:logout", async () => {
     defaultId: 1,
     cancelId: 1,
     message: "¿Cerrar la sesión de Claude Code en esta Mac?",
-    detail: "Afecta a todo Claude Code en esta Mac, no solo a claudino. Para volver: claude auth login.",
+    detail: "Afecta a todo Claude Code en esta Mac, no solo a MACCH Agent. Para volver: claude auth login.",
   });
   if (response !== 0) return false;
   await logout();
@@ -135,7 +140,7 @@ ipcMain.handle("hub:unpair", async () => {
     defaultId: 1,
     cancelId: 1,
     message: "¿Desvincular esta Mac de Slack?",
-    detail: "Tus pedidos a @claudino dejan de correr acá hasta que la vuelvas a vincular.",
+    detail: "Tus pedidos a @Machine AI dejan de correr acá hasta que la vuelvas a vincular.",
   });
   if (response === 0) hub.unpair();
 });
@@ -149,10 +154,17 @@ ipcMain.handle("app:info", () => ({
   launchAtLogin: app.getLoginItemSettings().openAtLogin,
 }));
 ipcMain.handle("app:launchAtLogin", (_e, on: boolean) => app.setLoginItemSettings({ openAtLogin: on }));
+// Theme picked in General: macOS draws the window chrome and dialogs to match ("retro" is a light theme).
+const THEME_BACKGROUND = { dark: "#161616", light: "#f5f5f4", retro: "#dedede" } as const;
+ipcMain.handle("app:theme", (_e, mode: string) => {
+  nativeTheme.themeSource = mode === "dark" ? "dark" : mode === "system" ? "system" : "light";
+  const effective = mode === "system" ? (nativeTheme.shouldUseDarkColors ? "dark" : "light") : mode;
+  if (win && !win.isDestroyed()) win.setBackgroundColor(THEME_BACKGROUND[effective as keyof typeof THEME_BACKGROUND] ?? THEME_BACKGROUND.dark);
+});
 ipcMain.handle("app:open", (_e, url: string) => {
   if (/^https:\/\/(claude\.ai|github\.com)\//.test(url)) return shell.openExternal(url);
 });
-// Browser login: only the URL hermes sent with the current pairing code.
+// Browser login: only the URL the Worker sent with the current pairing code.
 ipcMain.handle("hub:login", () => {
   const url = hub.pairing?.loginUrl;
   if (url && /^https:\/\//.test(url)) return shell.openExternal(url);

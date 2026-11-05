@@ -1,0 +1,28 @@
+{
+  // claudino on Cloudflare Workers (Free plan): replaces the relay on hermes.
+  "name": "claudino",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "rules": [{ "type": "Text", "globs": ["**/*.md"], "fallthrough": true }],
+  "durable_objects": {
+    "bindings": [
+      { "name": "USERS", "class_name": "UserDO" },
+      { "name": "THREADS", "class_name": "ThreadDO" },
+      { "name": "PAIRING", "class_name": "PairingDO" }
+    ]
+  },
+  // The Free plan only offers SQLite-backed Durable Objects.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserDO", "ThreadDO", "PairingDO"] }],
+  "vars": {
+    "ALERT_CHANNEL_ID": "C0C7YJPATEK", // #production-errors
+    "SENTRY_USER_ID": "U0C8J4GER8W", // Sentry app's bot user
+    "CLAUDE_USER_ID": "U0C9799P96K", // Claude (Claude Tag) app; mentions in #production-errors count too
+    "RELAY_APP_ID": "A0C6D03JEBT", // Machine AI (formerly Usage Bot): the Slack app this Worker answers as
+    "ALLOWED_USERS": "U0C5CGDBP8E,U0C68RT2SEL", // Facundo, Salvador
+    "AGENT_APP_ID": "A0CARJB2Q2C", // claudino (relay.py on hermes): Machine AI can delegate to it and waits for its answer
+    "AGENT_USER_ID": "U0CARJPDVEU", // claudino's bot user
+    "ROUTINE_FIRE_URL": "https://api.anthropic.com/v1/claude_code/routines/trig_01YFZ9tPxQGx7r31fmmKLAgi/fire"
+  }
+  // Secrets (wrangler secret put): SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET, SLACK_CLIENT_ID, SLACK_CLIENT_SECRET, ROUTINE_TOKEN
+}

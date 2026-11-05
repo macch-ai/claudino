@@ -4,8 +4,6 @@
 - A message that mentions @claudino in any public channel it belongs to starts a
   mention run. In a thread where claudino already took part, teammates' replies
   don't need the mention (unless they mention someone else instead).
-- Mention runs execute on the first requester's Mac through their claudino desktop
-  app (desktop_hub.py), so they use that teammate's own Claude Team seat.
 - While a run for a thread is working, new requests there are queued and handled
   together by one next run once claudino replies, so work is never duplicated.
 - Each request gets an :eyes: reaction as soon as it is seen.
@@ -28,7 +26,6 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk.errors import SlackApiError
 
 import claude_cli
-import desktop_hub
 import fire_claude
 
 CHANNEL_ID = "C0C7YJPATEK"  # #production-errors
@@ -36,6 +33,9 @@ SENTRY_USER_ID = "U0C8J4GER8W"  # Sentry app's bot user
 CLAUDE_USER_ID = "U0C9799P96K"  # Claude (Claude Tag) app; mentions in #production-errors count too
 RELAY_APP_ID = "A0CARJB2Q2C"  # claudino
 ALLOWED_USERS = {"U0C5CGDBP8E", "U0C68RT2SEL"}  # Facundo, Salvador
+# Other agents' apps that may ask claudino for work by mentioning it explicitly (never by thread follow-up).
+# They ignore agent messages themselves, so claudino's answer can't start a loop.
+TRUSTED_AGENT_APPS = {"A0C6D03JEBT"}  # Machine AI (MACCH Agent relay on Cloudflare)
 MAX_CATCH_UP_SECONDS = 24 * 60 * 60  # never replay more than 1 day after an outage
 BUSY_TIMEOUT_SECONDS = 60 * 60  # a run that never replied stops blocking its thread
 STATE_FILE = Path.home() / ".local/state/claude-relay/last_alert_ts"
@@ -44,12 +44,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("claude-relay")
 
 app = App(token=os.environ["SLACK_BOT_TOKEN"], ignoring_self_events_enabled=False)
-_auth = app.client.auth_test()
-RELAY_USER_ID = _auth["user_id"]
-# Mention runs go to the requester's own Mac; while it is off they wait in a queue on disk.
-hub = desktop_hub.Hub(on_post=lambda *args: post_automation(*args), on_connect=lambda user: resume_queued(user),
-                      allowed_users=ALLOWED_USERS, team_id=_auth.get("team_id", ""))
-QUEUE_FILE = Path.home() / ".local/state/claude-relay/queued.json"  # {user: {"C..:ts": {channel, thread_ts, requests}}}
+RELAY_USER_ID = app.client.auth_test()["user_id"]
 
 lock = threading.Lock()
 busy = {}  # thread_ts -> {"since": float, "channel": str, "pending": [(ts, user)]}
@@ -103,6 +98,14 @@ def claudino_in_thread(channel: str, thread_ts: str) -> bool:
     if seen:
         active_threads.add((channel, thread_ts))
     return seen
+
+
+def from_trusted_agent(message: dict) -> bool:
+    """A trusted agent's own message (not an edit or join) that mentions claudino."""
+    return (message.get("app_id") in TRUSTED_AGENT_APPS
+            and message.get("subtype") in (None, "bot_message")
+            and bool(message.get("user"))
+            and f"<@{RELAY_USER_ID}>" in (message.get("text") or ""))
 
 
 def addressed_to_claudino(message: dict) -> bool:
@@ -288,9 +291,7 @@ def post(channel: str, thread_ts: str, text: str) -> None:
 
 
 def work(channel: str, thread_ts: str, requests: list) -> None:
-    """Run the requests on the first requester's Mac, through their claudino desktop app."""
     key = f"{channel}:{thread_ts}"
-    owner = requests[0][1]
     requesters = " ".join(sorted({f"<@{user}>" for _, user in requests}))
     try:
         for attempt in range(2):
@@ -300,132 +301,18 @@ def work(channel: str, thread_ts: str, requests: list) -> None:
                     busy[thread_ts]["seen_until"] = float(last_seen)
             try:
                 started = time.time()
-                answer, is_error = hub.run(owner, key, prompt, claude_cli.INSTRUCTIONS_FILE.read_text(),
-                                           claude_cli.TIMEOUT_SECONDS)
+                answer, is_error = claude_cli.run(key, prompt)
                 claude_cli.update(key, seen_ts=last_seen)
-                log.info("session %s answered on %s's Mac in %.0fs (error=%s)",
-                         key, owner, time.time() - started, is_error)
+                log.info("session %s answered in %.0fs (error=%s)", key, time.time() - started, is_error)
                 break
-            except desktop_hub.RunFailed as error:
+            except RuntimeError as error:
                 if attempt:
                     raise
-                claude_cli.update(key, seen_ts="0")  # the app drops a failed session: resend the whole thread
                 log.warning("session %s failed, retrying with a new one: %s", key, error)
-        post(channel, thread_ts, answer or f"{requesters} la sesión terminó sin respuesta.")
-    except desktop_hub.Offline:
-        log.info("session %s queued: no desktop app connected for %s", key, owner)
-        if enqueue(owner, channel, thread_ts, requests):
-            post(channel, thread_ts, f"<@{owner}> tu Mac está apagada o sin la app de MACCH: "
-                                     "lo hago apenas se conecte.")
-        else:
-            reply_done(thread_ts)  # already announced: just free the thread
+        post(channel, thread_ts, answer or f"{requesters} la sesin termin sin respuesta.")
     except Exception as error:
         log.error("session %s failed: %s", key, error)
-        post(channel, thread_ts, f"{requesters} falló la sesión de Claude en la Mac de <@{owner}>: "
-                                 f"`{str(error)[:300]}`")
-
-
-_queue_lock = threading.Lock()
-
-
-def _load_queue() -> dict:
-    return json.loads(QUEUE_FILE.read_text()) if QUEUE_FILE.exists() else {}
-
-
-def _save_queue(queue: dict) -> None:
-    QUEUE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    QUEUE_FILE.write_text(json.dumps(queue, indent=1))
-
-
-def enqueue(user: str, channel: str, thread_ts: str, requests: list) -> bool:
-    """Keep a thread's requests until user's Mac connects. True when the thread was not queued yet."""
-    key = f"{channel}:{thread_ts}"
-    with _queue_lock:
-        queue = _load_queue()
-        threads = queue.setdefault(user, {})
-        new = key not in threads
-        entry = threads.setdefault(key, {"channel": channel, "thread_ts": thread_ts, "requests": []})
-        known = {ts for ts, _ in entry["requests"]}
-        entry["requests"] += [[ts, u] for ts, u in requests if ts not in known]
-        _save_queue(queue)
-    return new
-
-
-def resume_queued(user: str) -> None:
-    """user's Mac just connected: run the threads that waited for it."""
-    with _queue_lock:
-        queue = _load_queue()
-        threads = queue.pop(user, {})
-        _save_queue(queue)
-    for entry in threads.values():
-        channel, thread_ts = entry["channel"], entry["thread_ts"]
-        requests = [tuple(r) for r in entry["requests"]]
-        log.info("resuming queued thread %s:%s for %s", channel, thread_ts, user)
-        with lock:
-            state = busy.get(thread_ts)
-            if state and time.time() - state["since"] < BUSY_TIMEOUT_SECONDS:
-                state["pending"].extend(requests)
-                continue
-            busy[thread_ts] = {"since": time.time(), "channel": channel, "pending": []}
-        start(channel, thread_ts, requests)
-
-
-AUTOMATION_COMMAND = re.compile(r"^ejecut[aá]\s+(.+)$", re.IGNORECASE | re.DOTALL)
-PAIR_COMMAND = re.compile(r"^vincular\s+`?([A-Za-z0-9]{3}-?[A-Za-z0-9]{3})`?\.?$", re.IGNORECASE)
-
-
-def without_mentions(text: str) -> str:
-    return re.sub(r"<@[A-Z0-9]+(\|[^>]*)?>", "", text or "").strip()
-
-
-def automation_command(text: str) -> str | None:
-    """The automation name in "@claudino ejecutá <name>", or None for any other message."""
-    match = AUTOMATION_COMMAND.match(without_mentions(text))
-    return match.group(1).strip(" `\"'*_.") or None if match else None
-
-
-def pair_command(text: str) -> str | None:
-    """The code in "@claudino vincular 4F7-K2Q", or None for any other message."""
-    match = PAIR_COMMAND.match(without_mentions(text))
-    return match.group(1) if match else None
-
-
-def pair_desktop(channel: str, thread_ts: str, user: str, code: str, profile: dict) -> None:
-    """Link the desktop app showing this code to the teammate who sent it (Slack vouches for who they are)."""
-    details = {
-        "name": profile.get("real_name") or profile.get("display_name") or "",
-        "handle": profile.get("display_name") or profile.get("name") or "",
-        "avatar": profile.get("image_72") or "",
-    }
-    try:
-        ok = hub.complete_pair(code, user, details)
-    except Exception as error:
-        log.error("pairing for %s failed: %s", user, error)
-        ok = False
-    post(channel, thread_ts, f"<@{user}> listo: tu Mac quedó vinculada a claudino." if ok else
-         f"<@{user}> ese código no existe o venció: pedí uno nuevo en la app (Conexión).")
-
-
-def run_automation(channel: str, thread_ts: str, user: str, name: str) -> None:
-    """Run one of the requester's automations on their Mac and answer in the thread."""
-    try:
-        answer, is_error = hub.run_automation(user, name, claude_cli.TIMEOUT_SECONDS)
-        log.info("automation %r ran on %s's Mac (error=%s)", name, user, is_error)
-        post(channel, thread_ts, f"<@{user}> *{name}*:\n{answer or 'terminó sin respuesta.'}")
-    except desktop_hub.Offline:
-        post(channel, thread_ts, f"<@{user}> tu Mac no está conectada a claudino: abrí la app de escritorio.")
-    except Exception as error:
-        log.error("automation %r for %s failed: %s", name, user, error)
-        post(channel, thread_ts, f"<@{user}> falló la automatización *{name}*: `{str(error)[:300]}`")
-
-
-def post_automation(user: str, channel: str, name: str, text: str) -> None:
-    """A scheduled automation on a teammate's Mac finished: publish its result where they configured."""
-    try:
-        app.client.chat_postMessage(channel=channel, text=f"*{name}* · automatización de <@{user}>\n{text}"[:39000],
-                                    unfurl_links=False)
-    except SlackApiError as error:
-        log.error("automation %r post in %s failed: %s", name, channel, error.response.get("error"))
+        post(channel, thread_ts, f"{requesters} fall la sesin de Claude en hermes: `{str(error)[:300]}`")
 
 
 def reply_done(thread_ts: str) -> None:
@@ -455,25 +342,16 @@ def on_message(event: dict) -> None:
         if event.get("thread_ts"):
             reply_done(event["thread_ts"])
         return
+    if from_trusted_agent(event):
+        log.info("request %s from agent %s", event.get("ts"), event.get("app_id"))
+        dispatch(event)
+        return
     if event.get("subtype") or event.get("bot_id") or not event.get("user"):
         return
     if not addressed_to_claudino(event):
         return
     if event["user"] not in ALLOWED_USERS:
         log.info("skip %s from %s: not allowed", event.get("ts"), event.get("user"))
-        return
-    code = pair_command(event.get("text") or "")
-    if code:
-        ack(channel, event["ts"], event.get("text") or "")
-        thread_ts = event.get("thread_ts") or event["ts"]
-        threading.Thread(target=pair_desktop, daemon=True,
-                         args=(channel, thread_ts, event["user"], code, event.get("user_profile") or {})).start()
-        return
-    name = automation_command(event.get("text") or "")
-    if name:
-        ack(channel, event["ts"], event.get("text") or "")
-        thread_ts = event.get("thread_ts") or event["ts"]
-        threading.Thread(target=run_automation, args=(channel, thread_ts, event["user"], name), daemon=True).start()
         return
     dispatch(event)
 
@@ -501,6 +379,5 @@ def catch_up() -> None:
 
 
 if __name__ == "__main__":
-    hub.start()
     catch_up()
     SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"]).start()

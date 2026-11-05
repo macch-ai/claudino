@@ -1,14 +1,17 @@
 {
   "name": "claudino-desktop",
+  "productName": "MACCH Agent",
   "version": "0.1.0",
   "private": true,
-  "description": "claudino desktop: menu bar app that runs Claude Code locally with the user's own Claude Team login.",
+  "description": "MACCH Agent: menu bar app that runs Claude Code locally with the user's own Claude Team login.",
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc",
-    "start": "tsc && electron ."
+    "start": "tsc && electron .",
+    "package": "tsc && electron-packager . \"MACCH Agent\" --platform=darwin --arch=arm64 --icon=assets/icon.icns --app-bundle-id=ai.macch.agent --app-category-type=public.app-category.developer-tools --out=out --overwrite --ignore=\"^/(src|out)($|/)\" --ignore=\"\\.ts$\""
   },
   "devDependencies": {
+    "@electron/packager": "20.3.0",
     "@types/node": "22.20.5",
     "electron": "45.2.2",
     "typescript": "5.9.3"

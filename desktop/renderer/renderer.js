@@ -1,6 +1,28 @@
 const api = window.claudino;
 const $ = (id) => document.getElementById(id);
 
+// Theme: "system" follows macOS light/dark (and changes with it); "light", "dark" and "retro" are fixed.
+const THEME_KEY = "claudino.theme";
+const darkQuery = matchMedia("(prefers-color-scheme: dark)");
+function savedTheme() {
+  try { return localStorage.getItem(THEME_KEY) || "system"; } catch { return "system"; }
+}
+function paintTheme(mode) {
+  document.documentElement.dataset.theme = mode === "system" ? (darkQuery.matches ? "dark" : "light") : mode;
+}
+async function applyTheme(mode) {
+  paintTheme(mode); // right away, no flash
+  await api.setTheme(mode); // macOS follows too (window chrome, dialogs); for "system" this re-enables the OS setting
+  paintTheme(mode);
+  document.querySelectorAll('input[name="theme"]').forEach((r) => { r.checked = r.value === mode; });
+}
+darkQuery.addEventListener("change", () => { if (savedTheme() === "system") paintTheme("system"); });
+document.querySelectorAll('input[name="theme"]').forEach((r) => r.addEventListener("change", () => {
+  try { localStorage.setItem(THEME_KEY, r.value); } catch { /* the choice just won't persist */ }
+  applyTheme(r.value);
+}));
+applyTheme(savedTheme());
+
 function initials(text) {
   const words = (text || "").replace(/@.*/, "").split(/[\s._-]+/).filter(Boolean);
   return (words.slice(0, 2).map((w) => w[0]).join("") || "··").toUpperCase();
@@ -70,15 +92,15 @@ const HUB = {
   "no-config": ["Sin vincular", "Vinculá esta Mac con Slack para recibir tus pedidos.", "warn"],
   connecting: ["Conectando…", "", "warn"],
   connected: ["Conectada", "Tus pedidos de Slack corren en esta Mac.", "ok"],
-  denied: ["Vínculo revocado", "hermes ya no reconoce esta Mac (¿la vinculaste en otra?). Volvé a vincularla.", "bad"],
-  offline: ["Sin conexión", "No llego a claudino.macch.ai. ¿Hay internet? Reintentando… Tus pedidos esperan en cola.", "bad"],
+  denied: ["Vínculo revocado", "Machine AI ya no reconoce esta Mac (¿la vinculaste en otra?). Volvé a vincularla.", "bad"],
+  offline: ["Sin conexión", "No llego al servidor de Machine AI. ¿Hay internet? Reintentando… Tus pedidos esperan en cola.", "bad"],
 };
 
 const PAIR_RETRY = {
   expired: ["El código venció", "Pedí uno nuevo y mandalo en Slack dentro de 10 minutos."],
-  unreachable: ["No llego a claudino.macch.ai", "Revisá tu conexión a internet y volvé a intentar."],
-  busy: ["hermes está ocupado", "Hay demasiados códigos pendientes; probá en un minuto."],
-  idle: ["Vincular con Slack", "Pedí un código y escribíselo a @claudino en Slack."],
+  unreachable: ["No llego al servidor de Machine AI", "Revisá tu conexión a internet y volvé a intentar."],
+  busy: ["Machine AI está ocupado", "Hay demasiados códigos pendientes; probá en un minuto."],
+  idle: ["Vincular con Slack", "Pedí un código y escribíselo a @Machine AI en Slack."],
 };
 
 let pairing = null;
@@ -102,9 +124,9 @@ function renderPairing(s) {
     const login = Boolean(pairing.loginUrl);
     $("pair-login").hidden = !login && pairing.state === "waiting";
     $("login-slack").disabled = !login;
-    $("pair-alt-label").textContent = login ? "O escribí esto en Slack, en cualquier canal donde esté claudino:"
-      : "Escribí esto en cualquier canal donde esté claudino:";
-    $("pair-command").textContent = `@claudino vincular ${pairing.code || "···-···"}`;
+    $("pair-alt-label").textContent = login ? "O escribí esto en Slack, en cualquier canal donde esté Machine AI:"
+      : "Escribí esto en cualquier canal donde esté Machine AI:";
+    $("pair-command").textContent = `@Machine AI vincular ${pairing.code || "···-···"}`;
     $("copy-pair").disabled = !pairing.code;
     renderExpiry();
   } else {
@@ -115,7 +137,7 @@ function renderPairing(s) {
 }
 
 function renderExpiry() {
-  if (!pairing?.expiresAt) return void ($("pair-expiry").textContent = "Pidiendo código a hermes…");
+  if (!pairing?.expiresAt) return void ($("pair-expiry").textContent = "Pidiendo código…");
   const s = Math.max(0, Math.round((pairing.expiresAt - Date.now()) / 1000));
   $("pair-expiry").textContent = `Vence en ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}. La app se conecta sola cuando lo mandes.`;
 }
@@ -257,18 +279,32 @@ function scheduleText(s) {
 function when(ms) {
   if (!ms) return "";
   const d = new Date(ms);
-  const time = d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+  const time = d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", hour12: false });
   if (d.toDateString() === new Date().toDateString()) return `hoy ${time}`;
   return `${d.toLocaleDateString("es-AR", { weekday: "short", day: "numeric" })} ${time}`;
 }
 
+const sheet = $("automation-sheet");
+const sheetBg = $("automation-sheet-bg");
+
+function closeForm() {
+  sheet.classList.remove("open");
+  sheetBg.classList.remove("open");
+  sheet.setAttribute("aria-hidden", "true");
+}
+
 function openForm(a) {
-  form.hidden = false;
+  sheet.classList.add("open");
+  sheetBg.classList.add("open");
+  sheet.setAttribute("aria-hidden", "false");
+  $("automation-sheet-title").textContent = a ? a.name : "Nueva rutina";
+  $("automation-error").textContent = "";
   form.reset();
   form.elements.id.value = a?.id || "";
   form.elements.name.value = a?.name || "";
   form.elements.prompt.value = a?.prompt || "";
   form.elements.channel.value = a?.channel || "";
+  form.elements.dm.checked = a ? a.dm !== false : true;
   form.elements.enabled.checked = a ? a.enabled : true;
   const s = a?.schedule || { kind: "daily", time: "09:00", days: [1, 2, 3, 4, 5] };
   form.elements.kind.value = s.kind;
@@ -280,60 +316,81 @@ function openForm(a) {
   $("delete-automation").hidden = !a;
   syncKind();
   renderDays();
-  form.elements.name.focus();
+  setTimeout(() => form.elements.name.focus({ preventScroll: true }), 320); // after the panel slides in
+}
+
+/** The fields the app stores (the list also carries nextRunAt/running, which are computed). */
+function stored(a) {
+  const { nextRunAt, running, ...rest } = a;
+  return rest;
+}
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function tileFor(a) {
+  const failed = a.last && !a.last.ok;
+  const tile = el("article", "tile");
+  const head = el("div", "head");
+  head.append(el("span", `dot ${!a.enabled ? "off" : failed ? "bad" : "ok"}`), el("span", "name", a.name));
+  const toggle = el("input", "switch");
+  toggle.type = "checkbox";
+  toggle.checked = a.enabled;
+  toggle.setAttribute("aria-label", `Activar ${a.name}`);
+  toggle.addEventListener("change", async () => renderAutomations(await api.saveAutomation({ ...stored(a), enabled: toggle.checked })));
+  head.append(toggle);
+  const where = [a.dm !== false ? "DM" : "", a.channel ? "canal" : ""].filter(Boolean).join(" + ") || "sin aviso";
+  const meta = el("div", "sub", `${scheduleText(a.schedule)} · ${where}${a.enabled && a.nextRunAt ? ` · próxima ${when(a.nextRunAt)}` : a.enabled ? "" : " · pausada"}`);
+  const result = el("div", `result${failed ? " bad" : a.last ? "" : " none"}`, a.last ? a.last.text : "Todavía no corrió.");
+  const last = el("div", "sub", a.running ? "Corriendo ahora…" : a.last ? `${a.last.ok ? "✓" : "✕ falló"} ${when(a.last.at)}` : "");
+  const actions = el("div", "actions");
+  const run = el("button", `btn${a.running ? " running" : failed ? " primary" : ""}`, a.running ? "Corriendo" : failed ? "Reintentar" : "Ejecutar");
+  run.addEventListener("click", async () => {
+    run.classList.add("running");
+    run.textContent = "Corriendo";
+    renderAutomations(await api.runAutomation(a.id));
+  });
+  const edit = el("button", "btn ghost", "Editar");
+  edit.addEventListener("click", () => openForm(a));
+  actions.append(run, edit);
+  tile.append(head, meta, result, last, actions);
+  return tile;
 }
 
 function renderAutomations(list) {
   automationList = list;
   const box = $("automations");
-  box.replaceChildren();
-  if (!list.length) {
-    const empty = document.createElement("div");
-    empty.className = "empty";
-    empty.textContent = "Todavía no hay automatizaciones.";
-    return box.append(empty);
-  }
-  for (const a of list) {
-    const row = document.createElement("div");
-    row.className = "task automation";
-    const dot = document.createElement("span");
-    dot.className = `status-dot ${a.enabled ? "ok" : ""}`;
-    const body = document.createElement("div");
-    body.className = "grow";
-    const title = document.createElement("div");
-    title.className = "name";
-    title.textContent = a.name;
-    const summary = document.createElement("div");
-    summary.className = "summary";
-    const parts = [scheduleText(a.schedule)];
-    if (!a.enabled) parts.push("desactivada");
-    else if (a.nextRunAt) parts.push(`próxima: ${when(a.nextRunAt)}`);
-    if (a.lastRunAt) parts.push(`última: ${when(a.lastRunAt)}`);
-    summary.textContent = parts.join(" · ");
-    body.append(title, summary);
-    const actions = document.createElement("div");
-    actions.className = "actions";
-    if (a.channel) {
-      const tag = document.createElement("span");
-      tag.className = "tag";
-      tag.textContent = "Slack";
-      actions.append(tag);
-    }
-    row.append(dot, body, actions);
-    row.addEventListener("click", () => openForm(a));
-    box.append(row);
-  }
+  // The ones that failed first: they are what needs attention.
+  const sorted = [...list].sort((x, y) => Number(Boolean(y.last && !y.last.ok && y.enabled)) - Number(Boolean(x.last && !x.last.ok && x.enabled)));
+  const add = el("button", "tile add", "＋ Nueva rutina");
+  add.type = "button";
+  add.addEventListener("click", () => openForm(null));
+  box.replaceChildren(...sorted.map(tileFor), add);
 }
 
 $("new-automation").addEventListener("click", () => openForm(null));
-$("cancel-automation").addEventListener("click", () => { form.hidden = true; });
+$("cancel-automation").addEventListener("click", closeForm);
+$("close-automation").addEventListener("click", closeForm);
+sheetBg.addEventListener("click", closeForm);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && sheet.classList.contains("open")) closeForm(); });
 $("delete-automation").addEventListener("click", async () => {
   const id = form.elements.id.value;
   const a = automationList.find((x) => x.id === id);
   if (!a || !confirm(`¿Borrar la automatización "${a.name}"?`)) return;
   renderAutomations(await api.deleteAutomation(id));
-  form.hidden = true;
+  closeForm();
 });
+
+function formError(message) {
+  $("automation-error").textContent = message;
+  const btn = form.querySelector("[type=submit]");
+  btn.classList.add("shake");
+  setTimeout(() => btn.classList.remove("shake"), 400);
+}
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -342,20 +399,26 @@ form.addEventListener("submit", async (e) => {
   const schedule = kind === "slack" ? { kind }
     : kind === "interval" ? { kind, minutes: Math.max(1, Number(f.minutes.value) || 60) }
     : { kind, time: f.time.value || "09:00", days: [...selectedDays].sort() };
-  if (kind === "daily" && !schedule.days.length) return alert("Elegí al menos un día.");
   const name = f.name.value.trim();
+  if (!name) return formError("Ponele un nombre: así la pedís desde Slack.");
+  if (!f.prompt.value.trim()) return formError("Escribí qué tiene que hacer Claude.");
+  if (kind === "daily" && !schedule.days.length) return formError("Elegí al menos un día.");
   if (automationList.some((x) => x.id !== f.id.value && x.name.trim().toLowerCase() === name.toLowerCase())) {
-    return alert("Ya hay una automatización con ese nombre: Slack las busca por nombre.");
+    return formError("Ya hay una rutina con ese nombre: Slack las busca por nombre.");
   }
+  if (!f.dm.checked && !f.channel.value.trim() && kind !== "slack") return formError("Sin DM ni canal no te enterás del resultado.");
+  const existing = automationList.find((x) => x.id === f.id.value);
   renderAutomations(await api.saveAutomation({
+    ...(existing ? stored(existing) : {}),
     id: f.id.value || undefined,
     name,
     prompt: f.prompt.value.trim(),
     schedule,
     channel: f.channel.value.trim() || undefined,
+    dm: f.dm.checked,
     enabled: f.enabled.checked,
   }));
-  form.hidden = true;
+  closeForm();
 });
 
 api.automations().then(renderAutomations);

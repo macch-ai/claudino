@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://avatars.slack-edge.com https://secure.gravatar.com https://*.wp.com">
-  <title>claudino</title>
+  <title>MACCH Agent</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -56,7 +56,14 @@
         <button class="btn" id="open-usage">Ver uso</button>
         <button class="btn danger" id="logout">Cerrar sesión</button>
       </div>
-      <p class="hint" id="account-hint">Los pedidos de Slack corren con esta cuenta: consumen tu asiento del plan Team, no la cuenta de hermes.</p>
+      <p class="hint" id="account-hint">Los pedidos de Slack corren con esta cuenta: consumen tu asiento del plan Team, no una cuenta compartida.</p>
+      <h2>Apariencia</h2>
+      <div class="themes" role="radiogroup" aria-label="Tema">
+        <label class="theme" data-preview="system"><input type="radio" name="theme" value="system"><span class="swatch"><i></i><i></i></span><span>Sistema</span><span class="sub">Como tu Mac</span></label>
+        <label class="theme" data-preview="light"><input type="radio" name="theme" value="light"><span class="swatch"><i></i><i></i></span><span>Claro</span></label>
+        <label class="theme" data-preview="dark"><input type="radio" name="theme" value="dark"><span class="swatch"><i></i><i></i></span><span>Oscuro</span></label>
+        <label class="theme" data-preview="retro"><input type="radio" name="theme" value="retro"><span class="swatch"><i></i><i></i></span><span>Retro</span><span class="sub">Mac clásico</span></label>
+      </div>
       <h2>App</h2>
       <div class="card">
         <label class="row toggle-row">
@@ -70,7 +77,7 @@
       <h1>Conexión</h1>
       <h2>Slack</h2>
 
-      <!-- Linked: Slack profile + hermes status -->
+      <!-- Linked: Slack profile + connection status -->
       <div class="card row" id="slack-linked" hidden>
         <img class="avatar big" id="slack-avatar" alt="" hidden>
         <div class="avatar big" id="slack-initials" hidden></div>
@@ -91,9 +98,9 @@
             </div>
             <button class="btn primary" id="login-slack">Iniciar sesión con Slack</button>
           </div>
-          <div class="sub" id="pair-alt-label">Escribí esto en cualquier canal donde esté claudino:</div>
+          <div class="sub" id="pair-alt-label">Escribí esto en cualquier canal donde esté Machine AI:</div>
           <div class="pair-command">
-            <code id="pair-command">@claudino vincular ···-···</code>
+            <code id="pair-command">@Machine AI vincular ···-···</code>
             <button class="btn" id="copy-pair">Copiar</button>
           </div>
           <div class="sub" id="pair-expiry"></div>
@@ -107,7 +114,7 @@
         </div>
       </div>
 
-      <h2>hermes</h2>
+      <h2>Servidor</h2>
       <div class="card row">
         <span class="status-dot" id="hub-dot"></span>
         <div class="grow">
@@ -118,7 +125,7 @@
       <details class="advanced">
         <summary>Avanzado</summary>
         <form class="card form" id="url-form">
-          <label>URL de hermes<input name="url" required pattern="wss?://\S+"></label>
+          <label>URL del servidor<input name="url" required pattern="wss?://\S+"></label>
           <div class="row end"><button class="btn" type="submit">Guardar</button></div>
         </form>
       </details>
@@ -139,10 +146,20 @@
     <section class="page" id="page-automations" hidden>
       <div class="row">
         <h1 class="grow">Automatizaciones</h1>
-        <button class="btn primary" id="new-automation">Nueva</button>
+        <button class="btn primary" id="new-automation">Nueva rutina</button>
       </div>
-      <p class="hint top">Prompts guardados que Claude Code ejecuta en esta Mac, con tu cuenta: por horario mientras la app esté abierta, o desde Slack con <code>@claudino ejecutá &lt;nombre&gt;</code>.</p>
-      <form class="card form" id="automation-form" hidden>
+      <p class="hint top">Prompts guardados que Claude Code ejecuta en esta Mac, con tu cuenta: por horario mientras la app esté abierta, o desde Slack con <code>@Machine AI ejecutá &lt;nombre&gt;</code>. Si a la hora de una rutina la Mac estaba apagada, corre apenas vuelve.</p>
+      <div class="tiles" id="automations"></div>
+    </section>
+
+    <!-- Automation editor: a side panel over the cards (design 3, "Tarjetas") -->
+    <div class="sheet-bg" id="automation-sheet-bg"></div>
+    <aside class="sheet" id="automation-sheet" role="dialog" aria-modal="true" aria-labelledby="automation-sheet-title" aria-hidden="true">
+      <div class="row">
+        <h2 class="grow" id="automation-sheet-title">Nueva rutina</h2>
+        <button class="btn ghost" type="button" id="close-automation" aria-label="Cerrar">✕</button>
+      </div>
+      <form class="form" id="automation-form">
         <input type="hidden" name="id">
         <label>Nombre<input name="name" required placeholder="PRs abiertos"></label>
         <label>Prompt<textarea name="prompt" required placeholder="Listá los PRs abiertos de macch-core con su estado de CI y quién los tiene que revisar."></textarea></label>
@@ -158,7 +175,8 @@
           <div class="days" id="days"></div>
         </div>
         <label id="interval-fields" hidden>Cada (minutos)<input name="minutes" type="number" min="1" value="60"></label>
-        <label>Publicar el resultado en Slack (ID de canal, opcional)<input name="channel" placeholder="C0C7YJPATEK" pattern="[CDG][A-Z0-9]+"></label>
+        <label class="row toggle-row"><span class="grow">Mandarme el resultado por DM en Slack</span><input type="checkbox" class="switch" name="dm" checked></label>
+        <label>Publicarlo también en un canal (ID de canal, opcional)<input name="channel" placeholder="C0C7YJPATEK" pattern="[CDG][A-Z0-9]+"></label>
         <label class="row toggle-row"><span class="grow">Activada</span><input type="checkbox" class="switch" name="enabled" checked></label>
         <div class="row end">
           <button class="btn danger" type="button" id="delete-automation" hidden>Borrar</button>
@@ -166,16 +184,16 @@
           <button class="btn" type="button" id="cancel-automation">Cancelar</button>
           <button class="btn primary" type="submit">Guardar</button>
         </div>
+        <div class="err" id="automation-error" role="alert"></div>
       </form>
-      <div class="card list" id="automations"></div>
-    </section>
+    </aside>
 
     <section class="page" id="page-about" hidden>
       <h1>Acerca de</h1>
       <div class="card">
-        <div class="name">claudino</div>
+        <div class="name">MACCH Agent</div>
         <div class="sub" id="version"></div>
-        <p class="hint">Corre en esta Mac los pedidos que le hacés a @claudino en Slack, con tu login de Claude Code. hermes solo recibe de Slack y te pasa el pedido.</p>
+        <p class="hint">Corre en esta Mac los pedidos que le hacés a @Machine AI en Slack, con tu login de Claude Code. El servidor de Machine AI (en Cloudflare) solo recibe de Slack y te pasa el pedido.</p>
         <button class="btn" id="open-repo">Ver repositorio</button>
       </div>
     </section>

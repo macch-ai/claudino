@@ -18,6 +18,8 @@ export interface AskOptions {
   system?: string; // appended to Claude Code's system prompt
   cwd?: string;
   permissionMode?: "auto" | "default";
+  model?: string; // e.g. "haiku" for the emoji pick
+  noTools?: boolean;
 }
 
 // Apps launched from Finder get a minimal PATH, so add where `claude` is usually installed.
@@ -49,6 +51,8 @@ export async function ask(prompt: string, opts: AskOptions = {}): Promise<Claude
   if (opts.permissionMode) args.push("--permission-mode", opts.permissionMode);
   if (opts.system) args.push("--append-system-prompt", opts.system);
   if (opts.sessionId) args.push("--resume", opts.sessionId);
+  if (opts.model) args.push("--model", opts.model);
+  if (opts.noTools) args.push("--tools", "");
   const out = await run(args, opts.cwd);
   let data: Record<string, unknown>;
   try {

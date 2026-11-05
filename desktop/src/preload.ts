@@ -16,5 +16,7 @@ contextBridge.exposeInMainWorld("claudino", {
   automations: () => ipcRenderer.invoke("automations:list"),
   saveAutomation: (a: unknown) => ipcRenderer.invoke("automations:save", a),
   deleteAutomation: (id: string) => ipcRenderer.invoke("automations:delete", id),
+  runAutomation: (id: string) => ipcRenderer.invoke("automations:run", id),
+  setTheme: (mode: string) => ipcRenderer.invoke("app:theme", mode),
   onAutomations: (cb: (list: unknown) => void) => ipcRenderer.on("automations:state", (_e, l) => cb(l)),
 });

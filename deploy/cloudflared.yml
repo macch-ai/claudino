@@ -1,8 +1,0 @@
-# Copy to ~/.cloudflared/claudino.yml on hermes and replace <TUNNEL_ID> and <HOME>.
-# Only the hub is published: everything else on hermes stays private.
-tunnel: <TUNNEL_ID>
-credentials-file: <HOME>/.cloudflared/<TUNNEL_ID>.json
-ingress:
-  - hostname: claudino.macch.ai
-    service: http://127.0.0.1:8766
-  - service: http_status:404

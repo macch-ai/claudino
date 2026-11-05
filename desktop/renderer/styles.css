@@ -1,20 +1,84 @@
+/* Themes: <html data-theme="dark|light|retro">, set by renderer.js ("Sistema" follows macOS). Dark is the default. */
 :root {
   --bg: #161616;
   --sidebar: #222222;
   --card: #1e1e1e;
   --border: #2e2e2e;
   --hover: #3a3a3a;
+  --hover-soft: #2c2c2c;
+  --input: #262626;
   --text: #f2f2f2;
   --muted: #9a9a9a;
   --btn: #2c2c2c;
   --danger: #ef6b6b;
   --danger-bg: #3a1f1f;
   --accent: #d97757;
+  --accent-ink: #ffffff;
   --green: #4fbf67;
   --blue: #4a9cf5;
   --gray: #8a8a8a;
   --amber: #e0a33a;
+  --avatar-bg: #efefef;
+  --avatar-ink: #8a8a8a;
+  --font: -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+  --mono: ui-monospace, Menlo, monospace;
 }
+:root[data-theme="light"] {
+  --bg: #f5f5f4;
+  --sidebar: #ebeae8;
+  --card: #ffffff;
+  --border: #dddbd8;
+  --hover: #e1dfdc;
+  --hover-soft: #eceae7;
+  --input: #f1efec;
+  --text: #1c1b1a;
+  --muted: #6b6762;
+  --btn: #eceae7;
+  --danger: #c43c3c;
+  --danger-bg: #fbeaea;
+  --accent: #c4613f;
+  --green: #2f8f4a;
+  --blue: #2f6fd1;
+  --gray: #8a8a8a;
+  --amber: #a86b0c;
+  --avatar-bg: #e5e3e0;
+  --avatar-ink: #6b6762;
+}
+/* Retro: classic Mac OS "Platinum" — grey chrome, bevelled controls, Geneva/Monaco, pinstriped sidebar. */
+:root[data-theme="retro"] {
+  --bg: #dedede;
+  --sidebar: #cfcfcf;
+  --card: #eeeeee;
+  --border: #7a7a7a;
+  --hover: #bcbcbc;
+  --hover-soft: #d6d6d6;
+  --input: #ffffff;
+  --text: #000000;
+  --muted: #3f3f3f;
+  --btn: #dddddd;
+  --danger: #a40000;
+  --danger-bg: #f1d4d4;
+  --accent: #5a5ab4;
+  --green: #2f7d32;
+  --blue: #3355aa;
+  --gray: #777777;
+  --amber: #a06a00;
+  --avatar-bg: #ffffff;
+  --avatar-ink: #000000;
+  --font: Geneva, "Lucida Grande", -apple-system, sans-serif;
+  --mono: Monaco, ui-monospace, monospace;
+}
+:root[data-theme="retro"] .sidebar { background: repeating-linear-gradient(0deg, #d4d4d4 0 1px, #c8c8c8 1px 2px); }
+:root[data-theme="retro"] .card, :root[data-theme="retro"] .tile, :root[data-theme="retro"] .btn,
+:root[data-theme="retro"] input:not(.switch), :root[data-theme="retro"] textarea, :root[data-theme="retro"] select,
+:root[data-theme="retro"] pre, :root[data-theme="retro"] .tile .result, :root[data-theme="retro"] .icon,
+:root[data-theme="retro"] .nav, :root[data-theme="retro"] .theme, :root[data-theme="retro"] .sheet { border-radius: 3px !important; }
+:root[data-theme="retro"] .btn { border: 1px solid #000; box-shadow: inset -1px -1px 0 #8a8a8a, inset 1px 1px 0 #fff; }
+:root[data-theme="retro"] .btn.primary { color: #fff; box-shadow: inset -1px -1px 0 #33337a, inset 1px 1px 0 #9a9ae0; }
+:root[data-theme="retro"] .card, :root[data-theme="retro"] .tile { box-shadow: 2px 2px 0 rgb(0 0 0 / .35); }
+:root[data-theme="retro"] .nav.active { background: var(--accent); color: #fff; }
+:root[data-theme="retro"] .switch { border-radius: 3px; border: 1px solid #000; }
+:root[data-theme="retro"] .switch::after { border-radius: 2px; }
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; } /* classes below set display, which would otherwise win over [hidden] */
@@ -24,7 +88,7 @@ body {
   display: flex;
   background: var(--bg);
   color: var(--text);
-  font: 14px -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+  font: 14px var(--font);
   -webkit-font-smoothing: antialiased;
   user-select: none;
 }
@@ -46,7 +110,7 @@ body {
 .avatar {
   width: 36px; height: 36px; border-radius: 50%;
   display: grid; place-items: center;
-  background: #efefef; color: #cfcfcf;
+  background: var(--avatar-bg); color: var(--avatar-ink);
   font-size: 13px; font-weight: 600; flex-shrink: 0;
 }
 .avatar.big { width: 44px; height: 44px; font-size: 15px; }
@@ -59,7 +123,7 @@ nav { display: flex; flex-direction: column; gap: 4px; flex: 1; }
   background: none; color: var(--muted); font: inherit; font-size: 15px;
   text-align: left; cursor: default;
 }
-.nav:hover { background: #2c2c2c; }
+.nav:hover { background: var(--hover-soft); }
 .nav.active { background: var(--hover); color: var(--text); }
 .icon {
   width: 26px; height: 26px; border-radius: 7px;
@@ -100,7 +164,7 @@ h2 { font-size: 15px; margin: 26px 0 12px; }
 .toggle-row { cursor: default; }
 .switch {
   appearance: none; width: 40px; height: 24px; border-radius: 12px; margin: 0;
-  background: #3a3a3a; position: relative; transition: background .15s;
+  background: var(--hover); position: relative; transition: background .15s;
 }
 .switch::after {
   content: ""; position: absolute; top: 3px; left: 3px;
@@ -112,7 +176,7 @@ h2 { font-size: 15px; margin: 26px 0 12px; }
 .form { display: flex; flex-direction: column; gap: 12px; }
 .form label { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--muted); }
 input:not(.switch), textarea {
-  background: #262626; color: var(--text);
+  background: var(--input); color: var(--text);
   border: 1px solid var(--border); border-radius: 9px;
   padding: 8px 10px; font: inherit; user-select: text;
 }
@@ -120,7 +184,7 @@ input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 
 textarea { height: 64px; resize: vertical; }
 pre {
   margin: 0; white-space: pre-wrap; user-select: text;
-  background: #262626; border-radius: 9px; padding: 10px; max-height: 220px; overflow: auto;
+  background: var(--input); border-radius: 9px; padding: 10px; max-height: 220px; overflow: auto;
 }
 
 .status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--gray); flex-shrink: 0; }
@@ -140,9 +204,9 @@ pre {
 /* Automations */
 .icon.purple { background: #9b6bf2; }
 .hint.top { margin: -14px 2px 16px; }
-code { background: #2a2a2a; border-radius: 5px; padding: 1px 5px; font-size: 12px; }
+code { background: var(--input); border-radius: 5px; padding: 1px 5px; font-size: 12px; }
 select {
-  background: #262626; color: var(--text); border: 1px solid var(--border);
+  background: var(--input); color: var(--text); border: 1px solid var(--border);
   border-radius: 9px; padding: 8px 10px; font: inherit;
 }
 #automation-form { margin-bottom: 16px; }
@@ -150,24 +214,73 @@ select {
 .days { display: flex; gap: 6px; }
 .day {
   width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border);
-  background: #262626; color: var(--muted); font: inherit; font-size: 12px;
+  background: var(--input); color: var(--muted); font: inherit; font-size: 12px;
 }
 .day.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .automation { cursor: default; }
-.automation:hover { background: #232323; }
+.automation:hover { background: var(--hover-soft); }
 .automation .actions { display: flex; align-items: center; gap: 10px; }
 .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; }
 
 /* Connection: Slack pairing */
-img.avatar { object-fit: cover; background: #333; }
+img.avatar { object-fit: cover; background: var(--input); }
 .pair { display: flex; flex-direction: column; gap: 10px; }
 .pair-step { display: flex; flex-direction: column; gap: 10px; }
 .pair-step.row { flex-direction: row; }
 .pair-command { display: flex; align-items: center; gap: 12px; }
 .pair-command code {
   flex: 1; font-size: 17px; padding: 12px 14px; border-radius: 10px;
-  background: #262626; user-select: text; letter-spacing: .5px;
+  background: var(--input); user-select: text; letter-spacing: .5px;
 }
 .advanced { margin-top: 18px; }
 .advanced summary { color: var(--muted); font-size: 12.5px; cursor: default; margin-bottom: 10px; }
 #pair-login { padding-bottom: 14px; margin-bottom: 4px; border-bottom: 1px solid var(--border); }
+
+/* Automatizaciones: cards with the last result + side panel editor (design 3) */
+#page-automations { max-width: 980px; }
+#page-automations > .row { margin-bottom: 8px; }
+#page-automations .hint.top { margin: 0 2px 18px; max-width: 640px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 14px; }
+.tile { display: flex; flex-direction: column; gap: 10px; padding: 16px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; transition: transform .15s ease-out, border-color .2s; animation: tileIn .3s ease-out both; }
+.tile:hover { transform: translateY(-2px); border-color: var(--hover); }
+.tile:nth-child(2) { animation-delay: 40ms; } .tile:nth-child(3) { animation-delay: 80ms; } .tile:nth-child(n+4) { animation-delay: 120ms; }
+@keyframes tileIn { from { opacity: 0; transform: translateY(8px); } }
+.tile .head { display: flex; align-items: center; gap: 10px; }
+.tile .head .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile .result { font: 12px/1.5 var(--mono); background: var(--input); border-radius: 9px; padding: 9px 11px; white-space: pre-wrap; max-height: 132px; overflow: hidden; user-select: text; }
+.tile .result.bad { color: var(--danger); }
+.tile .result.none { color: var(--muted); }
+.tile .actions { display: flex; gap: 8px; margin-top: auto; }
+.tile .btn { min-height: 34px; padding: 0 12px; font-size: 13px; }
+.tile .btn.running { opacity: .75; pointer-events: none; }
+.tile .btn.running::before { content: ""; width: 12px; height: 12px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin .7s linear infinite; margin-right: 6px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.tile.add { border-style: dashed; background: transparent; display: grid; place-items: center; min-height: 170px; color: var(--muted); font: inherit; }
+.tile.add:hover { color: var(--text); border-color: var(--accent); }
+.dot.bad { background: var(--danger); }
+.dot.off { background: transparent; border: 2px solid var(--muted); }
+.sheet-bg { position: fixed; inset: 0; background: rgb(0 0 0 / .4); opacity: 0; pointer-events: none; transition: opacity .25s; z-index: 30; }
+.sheet-bg.open { opacity: 1; pointer-events: auto; }
+.sheet { position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 100%); background: var(--bg); border-left: 1px solid var(--border); padding: 44px 24px 24px; transform: translateX(100%); transition: transform .3s cubic-bezier(.2,.8,.2,1); z-index: 31; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+.sheet.open { transform: none; }
+.err { color: var(--danger); font-size: 12.5px; min-height: 1em; }
+.shake { animation: shake .35s ease-out; }
+@keyframes shake { 20%, 60% { transform: translateX(-5px); } 40%, 80% { transform: translateX(5px); } }
+@media (prefers-reduced-motion: reduce) { .tile, .sheet, .sheet-bg, .tile .btn.running::before { animation: none !important; transition: none !important; } }
+
+/* General → Apariencia: theme picker with a mini preview of each theme */
+.themes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.theme { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 8px 12px; border: 2px solid transparent; border-radius: 14px; cursor: default; text-align: center; transition: border-color .2s, background .2s; }
+.theme:hover { background: var(--hover-soft); }
+.theme:has(input:checked) { border-color: var(--accent); background: var(--card); }
+.theme:has(input:focus-visible) { outline: 2px solid var(--blue); outline-offset: 2px; }
+.theme input { position: absolute; opacity: 0; pointer-events: none; }
+.theme .sub { font-size: 11.5px; margin: 0; }
+.swatch { width: 100%; aspect-ratio: 16 / 10; border-radius: 9px; border: 1px solid var(--border); display: grid; grid-template-columns: 30% 1fr; overflow: hidden; margin-bottom: 4px; }
+.swatch i:first-child { border-right: 1px solid rgb(0 0 0 / .12); }
+.theme[data-preview="dark"] .swatch i:first-child { background: #222; } .theme[data-preview="dark"] .swatch i:last-child { background: linear-gradient(#161616 40%, #d97757 40% 52%, #161616 52%); }
+.theme[data-preview="light"] .swatch i:first-child { background: #ebeae8; } .theme[data-preview="light"] .swatch i:last-child { background: linear-gradient(#f5f5f4 40%, #c4613f 40% 52%, #f5f5f4 52%); }
+.theme[data-preview="retro"] .swatch { border-radius: 3px; border-color: #000; }
+.theme[data-preview="retro"] .swatch i:first-child { background: repeating-linear-gradient(0deg, #d4d4d4 0 1px, #c8c8c8 1px 2px); } .theme[data-preview="retro"] .swatch i:last-child { background: linear-gradient(#dedede 40%, #5a5ab4 40% 52%, #dedede 52%); }
+.theme[data-preview="system"] .swatch i:first-child { background: linear-gradient(135deg, #ebeae8 50%, #222 50%); } .theme[data-preview="system"] .swatch i:last-child { background: linear-gradient(135deg, #f5f5f4 50%, #161616 50%); }
+@media (max-width: 560px) { .themes { grid-template-columns: repeat(2, 1fr); } }
