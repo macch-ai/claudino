@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MACCH app · 10 direcciones</title>
+<style>
+:root {
+  --bg: #f6f5f3; --surface: #ffffff; --surface-2: #f0eeeb; --border: #e3e0dc; --text: #1c1b1a; --muted: #6b6762;
+  --accent: #c4613f; --accent-ink: #ffffff; --green: #2f8f4a; --blue: #2f6fd1; --purple: #7b55d6; --amber: #a86b0c; --danger: #c43c3c;
+  --danger-bg: #fbeaea; --focus: #2f6fd1;
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+  --r1: 8px; --r2: 12px; --r3: 16px;
+  --f-sm: 12.5px; --f: 14px; --f-lg: 17px; --f-xl: 22px; --f-2xl: 34px;
+  --ease: cubic-bezier(.2,.8,.2,1);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161616; --surface: #1e1e1e; --surface-2: #262626; --border: #2e2e2e; --text: #f2f2f2; --muted: #a3a09c;
+    --accent: #e0805f; --accent-ink: #1a0f0a; --green: #5cc977; --blue: #6aa6f8; --purple: #a98cf0; --amber: #e8b04a; --danger: #f07a7a;
+    --danger-bg: #3a1f1f; --focus: #8ab8ff;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font: var(--f)/1.45 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+h1, h2, h3 { margin: 0; line-height: 1.2; }
+h1 { font-size: var(--f-xl); } h2 { font-size: var(--f-lg); } h3 { font-size: var(--f); }
+.muted { color: var(--muted); } .sm { font-size: var(--f-sm); } .num { font-variant-numeric: tabular-nums; text-align: right; }
+.row { display: flex; align-items: center; gap: var(--s3); } .grow { flex: 1; min-width: 0; } .stack > * + * { margin-top: var(--s3); }
+
+/* Switcher */
+.switcher { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border); padding: var(--s2) var(--s4); }
+.switcher .tabs { display: flex; gap: var(--s1); overflow-x: auto; scrollbar-width: none; }
+.switcher .tabs button { flex: 0 0 auto; min-height: 36px; padding: 0 var(--s3); border-radius: 999px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; font-size: var(--f-sm); transition: background .2s var(--ease), transform .15s var(--ease); }
+.switcher .tabs button:active { transform: scale(.96); }
+.switcher .tabs button[aria-selected="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+.switcher .bet { margin-top: var(--s2); font-size: var(--f-sm); display: flex; gap: var(--s4); flex-wrap: wrap; }
+.switcher .bet b { color: var(--text); }
+.stage { padding: var(--s5) var(--s4) 80px; max-width: 1100px; margin: 0 auto; }
+.version { animation: enter .3s var(--ease); }
+@keyframes enter { from { opacity: 0; transform: translateY(8px); } }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .25s; }
+
+/* Shared atoms */
+.window { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r3); overflow: hidden; box-shadow: 0 10px 40px rgb(0 0 0 / .08); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r2); padding: var(--s4); }
+.btn { min-height: 40px; padding: 0 var(--s4); border-radius: var(--r1); border: 1px solid var(--border); background: var(--surface-2); cursor: pointer; display: inline-flex; align-items: center; gap: var(--s2); transition: transform .12s var(--ease), background .2s var(--ease), opacity .2s; white-space: nowrap; }
+.btn:hover { background: color-mix(in srgb, var(--surface-2) 70%, var(--text) 8%); }
+.btn:active { transform: scale(.97); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
+.btn.danger { color: var(--danger); background: var(--danger-bg); border-color: transparent; }
+.btn.ghost { background: transparent; border-color: transparent; }
+.btn[aria-busy="true"] { opacity: .7; pointer-events: none; }
+.btn[aria-busy="true"]::before { content: ""; width: 14px; height: 14px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin .7s linear infinite; }
+.btn.ok { background: var(--green); color: #fff; border-color: transparent; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.shake { animation: shake .35s var(--ease); }
+@keyframes shake { 20%, 60% { transform: translateX(-5px); } 40%, 80% { transform: translateX(5px); } }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: 0 0 auto; }
+.dot.ok { background: var(--green); box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 20%, transparent); }
+.dot.run { background: var(--amber); animation: pulse 1.2s ease-in-out infinite; }
+.dot.bad { background: var(--danger); }
+@keyframes pulse { 50% { opacity: .35; } }
+.tag { font-size: 11.5px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+.tag.acc { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.switch { appearance: none; width: 42px; height: 26px; border-radius: 13px; background: var(--border); position: relative; cursor: pointer; flex: 0 0 auto; transition: background .2s var(--ease); margin: 0; }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgb(0 0 0 / .25); transition: transform .2s var(--ease); }
+.switch:checked { background: var(--green); } .switch:checked::after { transform: translateX(16px); }
+.field { display: flex; flex-direction: column; gap: var(--s1); font-size: var(--f-sm); color: var(--muted); }
+.field input, .field textarea, .field select { min-height: 40px; padding: var(--s2) var(--s3); border-radius: var(--r1); border: 1px solid var(--border); background: var(--surface-2); color: var(--text); font-size: var(--f); }
+.field textarea { min-height: 84px; resize: vertical; }
+.field .err { color: var(--danger); min-height: 1em; }
+.avatar { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: linear-gradient(135deg, #d97757, #7b55d6); color: #fff; font-weight: 700; font-size: 13px; flex: 0 0 auto; }
+.logo { width: 22px; height: 22px; flex: 0 0 auto; }
+.list > * + * { border-top: 1px solid var(--border); }
+.item { display: flex; gap: var(--s3); align-items: center; padding: var(--s3) var(--s4); }
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px); opacity: 0; background: var(--text); color: var(--bg); padding: var(--s3) var(--s4); border-radius: var(--r2); transition: transform .25s var(--ease), opacity .25s; z-index: 50; max-width: calc(100% - 32px); }
+.toast.show { transform: translate(-50%, 0); opacity: 1; }
+.stagger > * { animation: enter .3s var(--ease) both; }
+.stagger > *:nth-child(2) { animation-delay: 40ms; } .stagger > *:nth-child(3) { animation-delay: 80ms; } .stagger > *:nth-child(4) { animation-delay: 120ms; } .stagger > *:nth-child(5) { animation-delay: 160ms; } .stagger > *:nth-child(n+6) { animation-delay: 200ms; }
+.empty { padding: var(--s6) var(--s4); text-align: center; color: var(--muted); }
+.kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px; padding: 1px 5px; color: var(--muted); }
+
+/* V1 sidebar */
+.v1 { display: grid; grid-template-columns: 220px 1fr; min-height: 560px; }
+.v1 aside { background: var(--surface-2); padding: var(--s4) var(--s3); display: flex; flex-direction: column; gap: var(--s1); }
+.v1 nav button { width: 100%; min-height: 44px; display: flex; align-items: center; gap: var(--s3); padding: 0 var(--s3); border: 0; border-radius: var(--r2); background: none; color: var(--muted); cursor: pointer; text-align: left; transition: background .2s; }
+.v1 nav button[aria-current="page"] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / .06); }
+.v1 .ico { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; color: #fff; font-size: 13px; }
+.v1 main { padding: var(--s5); }
+/* V2 dashboard */
+.v2 .hero { display: flex; align-items: center; gap: var(--s4); padding: var(--s5); border-radius: var(--r3); background: linear-gradient(135deg, color-mix(in srgb, var(--green) 14%, var(--surface)), var(--surface)); border: 1px solid var(--border); }
+.v2 .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s4); margin-top: var(--s4); }
+.v2 .big { font-size: var(--f-2xl); font-weight: 700; font-variant-numeric: tabular-nums; }
+/* V3 popover */
+.v3 { display: grid; place-items: start center; padding-top: var(--s2); }
+.v3 .pop { width: 360px; max-width: 100%; position: relative; }
+.v3 .pop::before { content: ""; position: absolute; top: -7px; left: 50%; width: 14px; height: 14px; background: var(--surface); border-left: 1px solid var(--border); border-top: 1px solid var(--border); transform: translateX(-50%) rotate(45deg); }
+.v3 .menubar { height: 28px; width: 360px; max-width: 100%; display: flex; justify-content: flex-end; align-items: center; gap: var(--s3); padding: 0 var(--s3); font-size: 12px; color: var(--muted); }
+/* V4 feed */
+.v4 .chips { display: flex; gap: var(--s2); flex-wrap: wrap; margin: var(--s4) 0; }
+.v4 .chips button { min-height: 36px; padding: 0 var(--s3); border-radius: 999px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; }
+.v4 .chips button[aria-pressed="true"] { background: var(--text); color: var(--bg); }
+.v4 .ev { display: grid; grid-template-columns: 54px 14px 1fr; gap: var(--s3); padding: var(--s3) 0; }
+.v4 .rail { position: relative; } .v4 .rail::before { content: ""; position: absolute; left: 6px; top: 16px; bottom: -14px; width: 2px; background: var(--border); }
+.v4 .ev:last-child .rail::before { display: none; }
+.v4 details summary { cursor: pointer; list-style: none; } .v4 details[open] .body { animation: enter .25s var(--ease); }
+/* V5 tables */
+.v5 table { width: 100%; border-collapse: collapse; font-size: var(--f-sm); }
+.v5 th, .v5 td { padding: var(--s2) var(--s3); border-bottom: 1px solid var(--border); text-align: left; }
+.v5 th button { all: unset; cursor: pointer; font-weight: 600; } .v5 th button:focus-visible { outline: 2px solid var(--focus); }
+.v5 .wrap { overflow-x: auto; }
+/* V6 palette */
+.v6 { display: grid; place-items: center; min-height: 520px; background: radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 60%); border-radius: var(--r3); }
+.v6 .pal { width: 560px; max-width: 100%; }
+.v6 .pal input { width: 100%; border: 0; border-bottom: 1px solid var(--border); background: transparent; padding: var(--s4); font-size: var(--f-lg); outline: none; }
+.v6 .opt { display: flex; gap: var(--s3); align-items: center; padding: var(--s3) var(--s4); cursor: pointer; min-height: 44px; }
+.v6 .opt[aria-selected="true"] { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--accent); }
+/* V7 master-detail */
+.v7 { display: grid; grid-template-columns: 300px 1fr; min-height: 560px; }
+.v7 .lst { border-right: 1px solid var(--border); }
+.v7 .lst button[data-id] { all: unset; box-sizing: border-box; width: 100%; display: flex; gap: var(--s3); align-items: center; padding: var(--s3) var(--s4); cursor: pointer; min-height: 56px; }
+.v7 .lst button[data-id][aria-current="true"] { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--accent); }
+.v7 .lst button[data-id]:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.v7 .detail { padding: var(--s5); }
+/* V8 wizard */
+.v8 { max-width: 560px; margin: 0 auto; }
+.v8 .steps { display: flex; gap: var(--s2); margin-bottom: var(--s5); }
+.v8 .steps span { flex: 1; height: 4px; border-radius: 2px; background: var(--border); position: relative; overflow: hidden; }
+.v8 .steps span::after { content: ""; position: absolute; inset: 0; background: var(--accent); transform: scaleX(0); transform-origin: left; transition: transform .35s var(--ease); }
+.v8 .steps span.done::after { transform: scaleX(1); }
+.v8 .pane { animation: slide .3s var(--ease); } @keyframes slide { from { opacity: 0; transform: translateX(24px); } }
+/* V9 week */
+.v9 .grid { display: grid; grid-template-columns: 56px repeat(7, 1fr); border: 1px solid var(--border); border-radius: var(--r2); overflow: hidden; background: var(--surface); }
+.v9 .grid > div { border-top: 1px solid var(--border); border-left: 1px solid var(--border); min-height: 44px; position: relative; }
+.v9 .grid .hd { min-height: 36px; display: grid; place-items: center; font-size: var(--f-sm); color: var(--muted); border-top: 0; }
+.v9 .grid .h { font-size: 11px; color: var(--muted); display: grid; place-items: start end; padding: 2px 6px; border-left: 0; }
+.v9 .slot { all: unset; position: absolute; inset: 0; cursor: pointer; } .v9 .slot:hover { background: var(--surface-2); } .v9 .slot:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.v9 .ev { position: absolute; inset: 4px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 18%, var(--surface)); border-left: 3px solid var(--accent); font-size: 11px; padding: 2px 6px; overflow: hidden; pointer-events: none; }
+.v9 .now { position: absolute; left: 0; right: 0; height: 2px; background: var(--danger); }
+.sheet { position: fixed; inset: auto 0 0 0; max-width: 520px; margin: 0 auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r3) var(--r3) 0 0; padding: var(--s5); transform: translateY(100%); transition: transform .3s var(--ease); z-index: 40; box-shadow: 0 -10px 40px rgb(0 0 0 / .2); }
+.sheet.open { transform: none; }
+/* V10 chat */
+.v10 { max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; min-height: 560px; }
+.v10 .log { flex: 1; display: flex; flex-direction: column; gap: var(--s3); padding: var(--s4) 0; }
+.v10 .msg { max-width: 85%; padding: var(--s3) var(--s4); border-radius: var(--r3); animation: enter .25s var(--ease); }
+.v10 .me { align-self: flex-end; background: var(--accent); color: var(--accent-ink); border-bottom-right-radius: 4px; }
+.v10 .bot { align-self: flex-start; background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+.v10 form { display: flex; gap: var(--s2); position: sticky; bottom: var(--s3); }
+.v10 form input { flex: 1; min-height: 48px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); padding: 0 var(--s4); }
+.v10 .sugg { display: flex; gap: var(--s2); flex-wrap: wrap; }
+
+@media (max-width: 720px) {
+  .v1 { grid-template-columns: 1fr; } .v1 aside { flex-direction: row; overflow-x: auto; } .v1 aside .who { display: none; } .v1 nav { display: flex; gap: var(--s1); } .v1 nav button { width: auto; }
+  .v2 .grid { grid-template-columns: 1fr; }
+  .v7 { grid-template-columns: 1fr; } .v7 .lst { border-right: 0; border-bottom: 1px solid var(--border); }
+  .v9 .grid { grid-template-columns: 40px repeat(7, minmax(36px, 1fr)); font-size: 10px; }
+  .stage { padding: var(--s4) var(--s4) 80px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+  ::view-transition-old(root), ::view-transition-new(root) { animation: none !important; }
+}
+</style>
+</head>
+<body>
+<header class="switcher">
+  <div class="tabs" role="tablist" aria-label="Versiones" id="tabs"></div>
+  <div class="bet muted" id="bet"></div>
+</header>
+<main class="stage" id="stage" aria-live="polite"></main>
+<div class="toast" id="toast" role="status"></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title"></div>
+
+<script>
+// ---------- Data (real shapes from the app) ----------
+const LOGO = '<svg class="logo" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="28" fill="currentColor"/><path d="M50 16a34 34 0 0 1 34 34" fill="none" stroke="currentColor" stroke-width="5"/><path d="M50 84a34 34 0 0 1-34-34" fill="none" stroke="currentColor" stroke-width="5"/></svg>';
+const state = {
+  connected: true,
+  me: { name: "Salvador Juarez", handle: "@salvador", org: "Macch", plan: "Claude Team" },
+  routines: [
+    { id: "repos", name: "Actualizar repos", prompt: "git fetch + pull --ff-only en macch-core y macch-hub; una línea por repo.", time: "10:00", days: [0,1,2,3,4,5,6], dm: true, on: true, last: "hoy 10:00", lastOk: true },
+    { id: "prs", name: "PRs abiertos", prompt: "Listá los PRs abiertos de macch-core con su CI y quién revisa.", time: "09:00", days: [1,2,3,4,5], dm: true, on: true, last: "hoy 09:00", lastOk: true },
+    { id: "sentry", name: "Errores nuevos de Sentry", prompt: "Resumí los errores nuevos de las últimas 24 h en #production-errors.", time: "18:30", days: [1,2,3,4,5], dm: false, channel: "#dev", on: false, last: "ayer 18:30", lastOk: false },
+  ],
+  tasks: [
+    { id: 1, label: "Pedido de Slack", where: "#ops · hilo de Facundo", summary: "Los cortes de FOPSA del lunes vienen de un timeout en el webhook.", state: "done", dur: 48, ago: "hace 6 min" },
+    { id: 2, label: "Actualizar repos", where: "Rutina · DM", summary: "macch-core: 3 commits nuevos · macch-hub: ya estaba al día", state: "done", dur: 21, ago: "hace 2 h" },
+    { id: 3, label: "Pedido de Slack", where: "#dev · @Usage Bot", summary: "Revisando el PR #612 de macch-hub…", state: "running", dur: 34, ago: "ahora" },
+    { id: 4, label: "Errores nuevos de Sentry", where: "Rutina · #dev", summary: "claude failed: timeout after 50 min", state: "failed", dur: 3000, ago: "ayer" },
+  ],
+};
+const DAYS = ["D", "L", "M", "M", "J", "V", "S"]; const ORDER = [1,2,3,4,5,6,0];
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const daysText = (d) => d.length === 7 ? "todos los días" : d.length === 5 && [1,2,3,4,5].every((x) => d.includes(x)) ? "lun a vie" : ORDER.filter((x) => d.includes(x)).map((x) => DAYS[x]).join(" ");
+const dur = (s) => s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s/60)}m ${s%60}s` : `${Math.floor(s/3600)}h`;
+const dotFor = (t) => ({ done: "ok", running: "run", failed: "bad" }[t.state]);
+const stateText = (t) => ({ done: "Respondida", running: "En curso", failed: "Falló" }[t.state]);
+
+// ---------- Helpers ----------
+function toast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 2200); }
+function runBtn(btn, ok = true, label = "Listo") {
+  const text = btn.innerHTML; btn.setAttribute("aria-busy", "true");
+  setTimeout(() => {
+    btn.removeAttribute("aria-busy");
+    if (ok) { btn.classList.add("ok"); btn.textContent = "✓ " + label; setTimeout(() => { btn.classList.remove("ok"); btn.innerHTML = text; }, 1400); }
+    else { btn.classList.add("shake"); setTimeout(() => btn.classList.remove("shake"), 400); }
+  }, 900);
+}
+function countUp(root) {
+  root.querySelectorAll("[data-count]").forEach((el) => {
+    const end = Number(el.dataset.count); const t0 = performance.now(); const D = 500;
+    const step = (t) => { const p = Math.min(1, (t - t0) / D); el.textContent = Math.round(end * (1 - Math.pow(1 - p, 3))); if (p < 1) requestAnimationFrame(step); };
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) el.textContent = end; else requestAnimationFrame(step);
+  });
+}
+function statusLine() { return state.connected ? `<span class="dot ok"></span><span><b>Conectada</b> · tus pedidos a @Usage Bot corren en esta Mac</span>` : `<span class="dot bad"></span><span><b>Sin conexión</b> · tus pedidos esperan en cola</span>`; }
+function routineRow(r, extra = "") {
+  return `<div class="item"><span class="dot ${r.on ? "ok" : ""}"></span><div class="grow"><div><b>${esc(r.name)}</b></div><div class="sm muted">${r.time} · ${daysText(r.days)} · ${r.dm ? "DM" : esc(r.channel)} · última: ${r.last}${r.lastOk ? "" : " (falló)"}</div></div>${extra}<input type="checkbox" class="switch" data-toggle="${r.id}" ${r.on ? "checked" : ""} aria-label="Activar ${esc(r.name)}"></div>`;
+}
+function bindToggles(root, rerender) {
+  root.querySelectorAll("[data-toggle]").forEach((sw) => sw.addEventListener("change", () => {
+    const r = state.routines.find((x) => x.id === sw.dataset.toggle); r.on = sw.checked; toast(`${r.name} ${r.on ? "activada" : "pausada"}`); rerender && rerender();
+  }));
+  root.querySelectorAll("[data-run]").forEach((b) => b.addEventListener("click", () => {
+    const r = state.routines.find((x) => x.id === b.dataset.run); if (!state.connected) { runBtn(b, false); toast("Sin conexión: no se puede ejecutar ahora"); return; }
+    runBtn(b, true, "Enviada"); setTimeout(() => toast(`${r.name}: el resultado te llega por ${r.dm ? "DM" : r.channel}`), 900);
+  }));
+}
+function connectToggle(root, rerender) {
+  root.querySelectorAll("[data-conn]").forEach((b) => b.addEventListener("click", () => { state.connected = !state.connected; toast(state.connected ? "Reconectada" : "Simulando sin conexión"); rerender(); }));
+}
+function openSheet(html, onMount) { const s = document.getElementById("sheet"); s.innerHTML = html; s.classList.add("open"); onMount && onMount(s); s.querySelector("input,textarea,button")?.focus(); }
+function closeSheet() { document.getElementById("sheet").classList.remove("open"); }
+
+// ---------- Versions ----------
+const V = [];
+
+// 1. Sidebar settings
+V.push({ name: "1 · Sidebar", bet: "Ajustes con sidebar (patrón Merlin): cada tema en su sección.", tradeoff: "Ordenado y familiar, pero el estado y las tareas quedan a un clic.", render(el) {
+  let page = "rutinas";
+  const draw = () => {
+    const pages = {
+      general: `<h1>General</h1><div class="card row" style="margin-top:16px"><div class="avatar">SJ</div><div class="grow"><b>${state.me.name}</b><div class="sm muted">salvador@macch.ai · ${state.me.plan}</div></div><button class="btn">Ver uso</button></div>
+        <label class="card row" style="margin-top:12px"><span class="grow">Abrir al iniciar sesión</span><input type="checkbox" class="switch" checked></label>`,
+      conexion: `<h1>Conexión</h1><div class="card row" style="margin-top:16px">${statusLine()}<span class="grow"></span><button class="btn" data-conn>${state.connected ? "Simular corte" : "Reconectar"}</button></div>`,
+      tareas: `<h1>Tareas</h1><div class="card list stagger" style="margin-top:16px;padding:0">${state.tasks.map((t) => `<div class="item"><span class="dot ${dotFor(t)}"></span><div class="grow"><b>${esc(t.label)}</b> <span class="sm muted">· ${stateText(t)} · ${dur(t.dur)}</span><div class="sm muted">${esc(t.summary)}</div></div><span class="sm muted">${t.ago}</span></div>`).join("")}</div>`,
+      rutinas: `<div class="row"><h1 class="grow">Rutinas</h1><button class="btn primary" id="v1new">Nueva rutina</button></div><div class="card list stagger" style="margin-top:16px;padding:0">${state.routines.map((r) => routineRow(r, `<button class="btn ghost" data-run="${r.id}">Ejecutar</button>`)).join("")}</div>`,
+    };
+    const nav = [["general","General","#8a8a8a","⚙"],["conexion","Conexión","#4fbf67","⛓"],["tareas","Tareas","#4a9cf5","☰"],["rutinas","Rutinas","#9b6bf2","⚡"]];
+    el.innerHTML = `<div class="window v1"><aside><div class="row who" style="padding:8px 8px 16px"><div class="avatar">SJ</div><div><b>${state.me.name}</b><div class="sm muted">${state.me.org}</div></div></div><nav aria-label="Secciones">${nav.map(([k,l,c,i]) => `<button data-p="${k}" ${k===page?'aria-current="page"':""}><span class="ico" style="background:${c}">${i}</span>${l}${k==="conexion"?`<span class="grow"></span><span class="dot ${state.connected?"ok":"bad"}"></span>`:""}</button>`).join("")}</nav></aside><main class="version">${pages[page]}</main></div>`;
+    el.querySelectorAll("[data-p]").forEach((b) => b.addEventListener("click", () => { page = b.dataset.p; draw(); el.querySelector(`[data-p="${page}"]`).focus(); }));
+    bindToggles(el, draw); connectToggle(el, draw);
+    el.querySelector("#v1new")?.addEventListener("click", () => toast("Abre el editor de rutina"));
+  };
+  draw();
+}});
+
+// 2. Dashboard
+V.push({ name: "2 · Dashboard", bet: "Estado arriba y tres tarjetas con números: se entiende en 2 segundos.", tradeoff: "Ideal para mirar; editar rutinas requiere ir a otra vista.", render(el) {
+  const draw = () => {
+    const running = state.tasks.filter((t) => t.state === "running").length, today = state.tasks.filter((t) => t.state === "done").length, on = state.routines.filter((r) => r.on).length;
+    el.innerHTML = `<div class="v2"><div class="hero">${LOGO}<div class="grow"><h1>${state.connected ? "Todo en orden" : "Tu Mac está desconectada"}</h1><div class="row muted" style="margin-top:6px">${statusLine()}</div></div><button class="btn primary" data-run="repos">Actualizar repos ahora</button></div>
+      <div class="grid stagger">
+        <section class="card"><h2>En curso</h2><div class="big" data-count="${running}">0</div><div class="sm muted">${esc(state.tasks.find((t) => t.state === "running")?.summary || "Nada corriendo")}</div></section>
+        <section class="card"><h2>Respondidas hoy</h2><div class="big" data-count="${today}">0</div><div class="sm muted">Promedio ${dur(35)} por pedido</div></section>
+        <section class="card"><h2>Rutinas activas</h2><div class="big" data-count="${on}">0</div><div class="sm muted">Próxima: PRs abiertos · mañana 09:00</div></section>
+      </div>
+      <section class="card list" style="margin-top:16px;padding:0"><div class="item"><h2 class="grow">Rutinas</h2><button class="btn ghost" data-conn>${state.connected ? "Simular corte" : "Reconectar"}</button></div>${state.routines.map((r) => routineRow(r)).join("")}</section></div>`;
+    countUp(el); bindToggles(el, draw); connectToggle(el, draw);
+  };
+  draw();
+}});
+
+// 3. Menu bar popover
+V.push({ name: "3 · Popover", bet: "Todo en el popover de la barra de menú: sin ventana, a un clic del logo.", tradeoff: "Rapidísimo para el día a día; poco espacio para editar prompts largos.", render(el) {
+  const draw = () => {
+    el.innerHTML = `<div class="v3"><div class="menubar" aria-hidden="true"><span>🔋</span><span>Wi‑Fi</span><span style="color:var(--text)">${LOGO.replace('class="logo"','class="logo" style="width:16px;height:16px"')}</span><span>mié 10:42</span></div>
+      <div class="pop window"><div class="item">${LOGO}<div class="grow"><b>MACCH</b><div class="sm muted row" style="gap:6px">${state.connected ? '<span class="dot ok"></span>Conectada' : '<span class="dot bad"></span>Sin conexión'}</div></div><button class="btn ghost" aria-label="Ajustes">⚙</button></div>
+      <div class="list stagger" style="border-top:1px solid var(--border)">${state.tasks.slice(0, 3).map((t) => `<div class="item"><span class="dot ${dotFor(t)}"></span><div class="grow"><div class="sm"><b>${esc(t.label)}</b> · ${t.ago}</div><div class="sm muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.summary)}</div></div></div>`).join("")}</div>
+      <div style="border-top:1px solid var(--border);padding:12px 16px" class="stack"><div class="sm muted">Rutinas</div>${state.routines.map((r) => `<div class="row"><span class="grow sm">${esc(r.name)} <span class="muted">· ${r.time}</span></span><button class="btn ghost" data-run="${r.id}" aria-label="Ejecutar ${esc(r.name)}">▶</button><input type="checkbox" class="switch" data-toggle="${r.id}" ${r.on ? "checked" : ""} aria-label="Activar ${esc(r.name)}"></div>`).join("")}</div>
+      <div class="row" style="border-top:1px solid var(--border);padding:12px 16px"><button class="btn primary grow" style="justify-content:center" data-run="repos">Actualizar repos ahora</button><button class="btn" data-conn>${state.connected ? "Pausar" : "Reanudar"}</button></div></div></div>`;
+    bindToggles(el, draw); connectToggle(el, draw);
+  };
+  draw();
+}});
+
+// 4. Activity feed
+V.push({ name: "4 · Feed", bet: "Una sola línea de tiempo con pedidos de Slack y rutinas, filtrable.", tradeoff: "Excelente para entender qué pasó; las rutinas se configuran aparte.", render(el) {
+  let filter = "todo";
+  const draw = () => {
+    const items = state.tasks.filter((t) => filter === "todo" || (filter === "slack" ? t.label === "Pedido de Slack" : filter === "rutinas" ? t.label !== "Pedido de Slack" : t.state === "failed"));
+    el.innerHTML = `<div class="v4"><div class="row"><h1 class="grow">Actividad</h1><span class="row sm muted">${statusLine()}</span></div>
+      <div class="chips" role="group" aria-label="Filtro">${[["todo","Todo"],["slack","Slack"],["rutinas","Rutinas"],["errores","Errores"]].map(([k,l]) => `<button aria-pressed="${k===filter}" data-f="${k}">${l}</button>`).join("")}</div>
+      <div class="card stagger" style="padding:4px 16px">${items.length ? items.map((t) => `<div class="ev"><span class="sm muted num">${t.ago.replace("hace ","")}</span><span class="rail"><span class="dot ${dotFor(t)}" style="display:block;margin-top:5px"></span></span><details ${t.state==="running"?"open":""}><summary><b>${esc(t.label)}</b> <span class="sm muted">· ${esc(t.where)} · ${stateText(t)}</span></summary><div class="body sm" style="margin-top:6px">${esc(t.summary)}<div class="row" style="margin-top:8px">${t.state==="failed"?'<button class="btn primary" data-retry>Reintentar</button>':'<button class="btn">Abrir en Slack</button>'}</div></div></details></div>`).join("") : `<div class="empty">No hay ${filter} todavía.</div>`}</div></div>`;
+    el.querySelectorAll("[data-f]").forEach((b) => b.addEventListener("click", () => { filter = b.dataset.f; draw(); }));
+    el.querySelectorAll("[data-retry]").forEach((b) => b.addEventListener("click", () => runBtn(b, state.connected, "Reintentada")));
+  };
+  draw();
+}});
+
+// 5. Dense tables
+V.push({ name: "5 · Tablas", bet: "Tareas y rutinas en tablas ordenables, máxima densidad.", tradeoff: "Rápido para escanear mucho; frío y menos guiado para alguien nuevo.", render(el) {
+  let sort = { key: "time", dir: 1 };
+  const draw = () => {
+    const rs = [...state.routines].sort((a, b) => (a[sort.key] > b[sort.key] ? 1 : -1) * sort.dir);
+    const th = (k, l, num) => `<th${num ? ' class="num"' : ""} aria-sort="${sort.key===k ? (sort.dir>0?"ascending":"descending") : "none"}"><button data-s="${k}">${l}${sort.key===k ? (sort.dir>0?" ↑":" ↓") : ""}</button></th>`;
+    el.innerHTML = `<div class="v5 stack"><div class="row"><h1 class="grow">Rutinas</h1><span class="row sm">${statusLine()}</span><button class="btn primary">Nueva rutina</button></div>
+      <div class="card wrap" style="padding:0"><table><thead><tr><th>Activa</th>${th("name","Nombre")}${th("time","Hora",true)}<th>Días</th><th>Destino</th>${th("last","Última")}<th></th></tr></thead><tbody>${rs.map((r) => `<tr><td><input type="checkbox" class="switch" data-toggle="${r.id}" ${r.on?"checked":""} aria-label="Activar ${esc(r.name)}"></td><td><b>${esc(r.name)}</b></td><td class="num">${r.time}</td><td>${daysText(r.days)}</td><td>${r.dm?"DM":esc(r.channel)}</td><td>${r.last}${r.lastOk?"":' <span class="tag" style="color:var(--danger)">falló</span>'}</td><td><button class="btn ghost" data-run="${r.id}">Ejecutar</button></td></tr>`).join("")}</tbody></table></div>
+      <h2>Tareas recientes</h2><div class="card wrap" style="padding:0"><table><thead><tr><th>Estado</th><th>Origen</th><th>Resumen</th><th class="num">Duración</th><th class="num">Cuándo</th></tr></thead><tbody>${state.tasks.map((t) => `<tr><td><span class="row" style="gap:6px"><span class="dot ${dotFor(t)}"></span>${stateText(t)}</span></td><td>${esc(t.label)}</td><td class="muted">${esc(t.summary)}</td><td class="num">${dur(t.dur)}</td><td class="num">${t.ago}</td></tr>`).join("")}</tbody></table></div></div>`;
+    el.querySelectorAll("[data-s]").forEach((b) => b.addEventListener("click", () => { sort = { key: b.dataset.s, dir: sort.key === b.dataset.s ? -sort.dir : 1 }; draw(); el.querySelector(`[data-s="${sort.key}"]`).focus(); }));
+    bindToggles(el, draw);
+  };
+  draw();
+}});
+
+// 6. Command palette
+V.push({ name: "6 · Comandos", bet: "La paleta ⌘K es la interfaz: todo se hace escribiendo.", tradeoff: "Imbatible con teclado; hay que saber qué buscar.", render(el) {
+  const cmds = [
+    ...state.routines.map((r) => ({ icon: "▶", label: `Ejecutar «${r.name}»`, hint: `${r.time} · ${daysText(r.days)}`, run: () => toast(`${r.name}: enviada a esta Mac`) })),
+    ...state.routines.map((r) => ({ icon: r.on ? "⏸" : "⏵", label: `${r.on ? "Pausar" : "Activar"} «${r.name}»`, hint: "Rutina", run: () => { r.on = !r.on; toast(`${r.name} ${r.on ? "activada" : "pausada"}`); } })),
+    { icon: "+", label: "Nueva rutina…", hint: "Prompt + horario", run: () => toast("Abre el editor") },
+    { icon: "⛓", label: "Ver estado de conexión", hint: state.connected ? "Conectada" : "Sin conexión", run: () => toast(state.connected ? "Conectada a claudino.macch-claudino.workers.dev" : "Sin conexión") },
+    { icon: "☰", label: "Ver últimas tareas", hint: `${state.tasks.length} recientes`, run: () => toast("Abre Tareas") },
+    { icon: "↗", label: "Ver uso del plan Team", hint: "claude.ai", run: () => toast("Abre claude.ai/settings/usage") },
+  ];
+  let q = "", sel = 0;
+  el.innerHTML = `<div class="v6"><div class="pal window" role="combobox" aria-expanded="true" aria-haspopup="listbox"><label class="sr" for="pq" style="position:absolute;left:-9999px">Buscar comando</label><input id="pq" placeholder="Qué querés hacer… (probá «repos»)" autocomplete="off" aria-controls="pl"><div id="pl" role="listbox" aria-label="Comandos"></div><div class="item sm muted" style="border-top:1px solid var(--border)"><span class="row" style="gap:6px">${statusLine()}</span><span class="grow"></span><span class="kbd">↑↓</span><span class="kbd">↵</span></div></div></div>`;
+  const input = el.querySelector("#pq"), list = el.querySelector("#pl");
+  const draw = () => {
+    const items = cmds.filter((c) => c.label.toLowerCase().includes(q.toLowerCase()));
+    sel = Math.min(sel, Math.max(0, items.length - 1));
+    list.innerHTML = items.length ? items.map((c, i) => `<div class="opt" role="option" id="o${i}" aria-selected="${i===sel}" data-i="${i}"><span style="width:20px;text-align:center">${c.icon}</span><span class="grow">${esc(c.label)}</span><span class="sm muted">${esc(c.hint)}</span></div>`).join("") : `<div class="empty">Ningún comando con «${esc(q)}». Probá «rutina» o «estado».</div>`;
+    input.setAttribute("aria-activedescendant", items.length ? `o${sel}` : "");
+    list.querySelectorAll(".opt").forEach((o) => o.addEventListener("click", () => { items[+o.dataset.i].run(); }));
+    return items;
+  };
+  let items = draw();
+  input.addEventListener("input", () => { q = input.value; sel = 0; items = draw(); });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") { sel = Math.min(sel + 1, items.length - 1); items = draw(); e.preventDefault(); e.stopPropagation(); }
+    if (e.key === "ArrowUp") { sel = Math.max(sel - 1, 0); items = draw(); e.preventDefault(); e.stopPropagation(); }
+    if (e.key === "Enter" && items[sel]) { items[sel].run(); }
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") e.stopPropagation();
+  });
+  setTimeout(() => input.focus(), 50);
+}});
+
+// 7. Master-detail
+V.push({ name: "7 · Maestro‑detalle", bet: "Lista de rutinas a la izquierda, editor completo a la derecha.", tradeoff: "El mejor para crear y ajustar rutinas; el estado general queda chico.", render(el) {
+  let cur = state.routines[0].id; let days = new Set(state.routines[0].days);
+  const draw = () => {
+    const r = state.routines.find((x) => x.id === cur) || { id: "new", name: "", prompt: "", time: "09:00", days: [1,2,3,4,5], dm: true, on: true };
+    el.innerHTML = `<div class="window v7"><div class="lst"><div class="item"><b class="grow">Rutinas</b><button class="btn" id="v7add" aria-label="Nueva rutina">+</button></div>${state.routines.map((x) => `<button data-id="${x.id}" aria-current="${x.id===cur}"><span class="dot ${x.on?"ok":""}"></span><span class="grow"><b>${esc(x.name)}</b><span class="sm muted" style="display:block">${x.time} · ${daysText(x.days)}</span></span></button>`).join("")}<div class="item sm row" style="border-top:1px solid var(--border)">${statusLine()}</div></div>
+      <form class="detail stack version" novalidate><h1>${r.id === "new" ? "Nueva rutina" : esc(r.name)}</h1>
+        <label class="field">Nombre<input name="name" value="${esc(r.name)}" required><span class="err" id="e-name"></span></label>
+        <label class="field">Qué tiene que hacer Claude<textarea name="prompt" required>${esc(r.prompt)}</textarea><span class="err" id="e-prompt"></span></label>
+        <div class="row" style="flex-wrap:wrap"><label class="field">Hora<input type="time" name="time" value="${r.time}"></label><fieldset class="field" style="border:0;padding:0;margin:0"><legend>Días</legend><div class="row" style="gap:6px">${ORDER.map((d) => `<button type="button" class="btn ${days.has(d)?"primary":""}" style="min-width:44px;padding:0;justify-content:center" aria-pressed="${days.has(d)}" data-d="${d}">${DAYS[d]}</button>`).join("")}</div></fieldset></div>
+        <label class="row card"><span class="grow">Mandarme el resultado por DM</span><input type="checkbox" class="switch" name="dm" ${r.dm?"checked":""}></label>
+        <div class="row"><button class="btn primary" type="submit">Guardar</button><button class="btn" type="button" data-run="${r.id}" ${r.id==="new"?"disabled":""}>Ejecutar ahora</button><span class="grow"></span>${r.id!=="new"?'<button class="btn danger" type="button" id="v7del">Borrar</button>':""}</div></form></div>`;
+    el.querySelectorAll("[data-id]").forEach((b) => b.addEventListener("click", () => { cur = b.dataset.id; days = new Set(state.routines.find((x) => x.id === cur).days); draw(); }));
+    el.querySelector("#v7add").addEventListener("click", () => { cur = "new"; days = new Set([1,2,3,4,5]); draw(); el.querySelector("[name=name]").focus(); });
+    el.querySelectorAll("[data-d]").forEach((b) => b.addEventListener("click", () => { const d = +b.dataset.d; days.has(d) ? days.delete(d) : days.add(d); b.classList.toggle("primary"); b.setAttribute("aria-pressed", days.has(d)); }));
+    el.querySelector("#v7del")?.addEventListener("click", () => { state.routines = state.routines.filter((x) => x.id !== cur); cur = state.routines[0]?.id ?? "new"; toast("Rutina borrada"); draw(); });
+    bindToggles(el);
+    el.querySelector("form").addEventListener("submit", (e) => {
+      e.preventDefault(); const f = e.target; const btn = f.querySelector("[type=submit]");
+      f.querySelector("#e-name").textContent = f.name.value.trim() ? "" : "Ponele un nombre: así la pedís desde Slack.";
+      f.querySelector("#e-prompt").textContent = f.prompt.value.trim() ? "" : "Escribí qué tiene que hacer.";
+      if (!f.name.value.trim() || !f.prompt.value.trim() || !days.size) { runBtn(btn, false); if (!days.size) toast("Elegí al menos un día"); return; }
+      const data = { name: f.name.value.trim(), prompt: f.prompt.value.trim(), time: f.time.value, days: [...days], dm: f.dm.checked };
+      if (cur === "new") { const id = "r" + Date.now(); state.routines.push({ id, on: true, last: "nunca", lastOk: true, ...data }); cur = id; } else Object.assign(state.routines.find((x) => x.id === cur), data);
+      runBtn(btn, true, "Guardada"); setTimeout(draw, 1500);
+    });
+  };
+  draw();
+}});
+
+// 8. Wizard
+V.push({ name: "8 · Asistente", bet: "Primer uso guiado en 3 pasos: Claude → Slack → primera rutina.", tradeoff: "Imposible perderse al arrancar; después del onboarding no sirve como pantalla diaria.", render(el) {
+  let step = 0; const data = { name: "Actualizar repos", time: "10:00" };
+  const steps = [
+    () => `<h1>1. Tu cuenta de Claude</h1><p class="muted">Los pedidos corren con tu asiento del plan Team, no con créditos de API.</p><div class="card row"><div class="avatar">SJ</div><div class="grow"><b>salvador@macch.ai</b><div class="sm muted">Macch · claude.ai</div></div><span class="tag acc">Detectada ✓</span></div>`,
+    () => `<h1>2. Vincular Slack</h1><p class="muted">Se abre el navegador; confirmás con tu cuenta y vuelve sola.</p><button class="btn primary" id="v8slack">Iniciar sesión con Slack</button><p class="sm muted" id="v8st" aria-live="polite"></p>`,
+    () => `<h1>3. Tu primera rutina</h1><p class="muted">Corre en esta Mac y te avisa por DM.</p><label class="field">Nombre<input id="v8n" value="${esc(data.name)}"><span class="err" id="v8e"></span></label><label class="field" style="margin-top:12px">Hora (todos los días)<input type="time" id="v8t" value="${data.time}"></label>`,
+    () => `<div style="text-align:center;padding:24px 0"><div style="font-size:48px">✓</div><h1>Listo</h1><p class="muted">«${esc(data.name)}» corre todos los días a las ${data.time}. Escribile a @Usage Bot cuando quieras.</p></div>`,
+  ];
+  let linked = false;
+  const draw = () => {
+    el.innerHTML = `<div class="v8"><div class="steps" aria-label="Paso ${Math.min(step+1,3)} de 3">${[0,1,2].map((i) => `<span class="${i < step || step === 3 ? "done" : ""}"></span>`).join("")}</div><div class="card pane stack">${steps[step]()}<div class="row" style="margin-top:20px">${step>0&&step<3?'<button class="btn" id="v8b">Atrás</button>':""}<span class="grow"></span>${step<3?`<button class="btn primary" id="v8n2">${step===2?"Crear rutina":"Siguiente"}</button>`:'<button class="btn" id="v8r">Volver a empezar</button>'}</div></div></div>`;
+    el.querySelector("#v8b")?.addEventListener("click", () => { step--; draw(); });
+    el.querySelector("#v8r")?.addEventListener("click", () => { step = 0; linked = false; draw(); });
+    el.querySelector("#v8slack")?.addEventListener("click", (e) => { runBtn(e.currentTarget, true, "Vinculada"); setTimeout(() => { linked = true; el.querySelector("#v8st").textContent = "Vinculada como Salvador Juarez (@salvador)."; }, 900); });
+    el.querySelector("#v8n2")?.addEventListener("click", (e) => {
+      if (step === 1 && !linked) { runBtn(e.currentTarget, false); toast("Primero vinculá Slack"); return; }
+      if (step === 2) { const n = el.querySelector("#v8n").value.trim(); if (!n) { el.querySelector("#v8e").textContent = "Necesita un nombre."; runBtn(e.currentTarget, false); return; } data.name = n; data.time = el.querySelector("#v8t").value; }
+      step++; draw();
+    });
+  };
+  draw();
+}});
+
+// 9. Week schedule
+V.push({ name: "9 · Agenda", bet: "Las rutinas en una grilla semanal; tocás un hueco para crear una.", tradeoff: "Muestra al instante cuándo pasa todo; no sirve para ver pedidos de Slack.", render(el) {
+  const hours = [8,9,10,11,12,13,14,15,16,17,18,19];
+  const draw = () => {
+    let cells = `<div class="hd"></div>${ORDER.map((d) => `<div class="hd">${["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"][d]}</div>`).join("")}`;
+    for (const h of hours) {
+      cells += `<div class="h">${h}:00</div>`;
+      for (const d of ORDER) {
+        const ev = state.routines.filter((r) => r.on && r.days.includes(d) && +r.time.split(":")[0] === h);
+        cells += `<div><button class="slot" data-h="${h}" data-d="${d}" aria-label="Crear rutina el ${["domingo","lunes","martes","miércoles","jueves","viernes","sábado"][d]} a las ${h}:00"></button>${ev.map((r) => `<div class="ev"><b>${esc(r.name)}</b> ${r.time}</div>`).join("")}${d===3&&h===10?'<div class="now" style="top:70%" aria-hidden="true"></div>':""}</div>`;
+      }
+    }
+    el.innerHTML = `<div class="v9 stack"><div class="row"><h1 class="grow">Semana</h1><span class="row sm">${statusLine()}</span></div><div class="grid">${cells}</div><div class="sm muted">Las rutinas pausadas no se muestran. ${state.routines.filter((r) => !r.on).map((r) => esc(r.name)).join(", ") || ""}</div></div>`;
+    el.querySelectorAll(".slot").forEach((s) => s.addEventListener("click", () => {
+      const h = String(s.dataset.h).padStart(2, "0"), d = +s.dataset.d;
+      openSheet(`<h2 id="sheet-title">Nueva rutina · ${["dom","lun","mar","mié","jue","vie","sáb"][d]} ${h}:00</h2><form class="stack" style="margin-top:12px" novalidate><label class="field">Nombre<input name="n" required><span class="err"></span></label><label class="field">Qué tiene que hacer<textarea name="p"></textarea></label><label class="row"><span class="grow">Repetir de lunes a viernes</span><input type="checkbox" class="switch" name="w" checked></label><div class="row"><button class="btn" type="button" id="sc">Cancelar</button><span class="grow"></span><button class="btn primary">Crear</button></div></form>`, (sh) => {
+        sh.querySelector("#sc").addEventListener("click", closeSheet);
+        sh.querySelector("form").addEventListener("submit", (e) => { e.preventDefault(); const f = e.target; if (!f.n.value.trim()) { f.querySelector(".err").textContent = "Ponele un nombre."; f.n.classList.add("shake"); setTimeout(() => f.n.classList.remove("shake"), 400); return; }
+          state.routines.push({ id: "r" + Date.now(), name: f.n.value.trim(), prompt: f.p.value, time: `${h}:00`, days: f.w.checked ? [1,2,3,4,5] : [d], dm: true, on: true, last: "nunca", lastOk: true }); closeSheet(); toast("Rutina creada"); draw(); });
+      });
+    }));
+  };
+  draw();
+}});
+
+// 10. Conversational
+V.push({ name: "10 · Charla", bet: "Le pedís rutinas en lenguaje natural y la app te propone la configuración.", tradeoff: "Cero formularios; menos visibilidad de todo lo que existe.", render(el) {
+  const log = [{ who: "bot", html: `Hola Salvador. ${state.connected ? "Estoy conectado" : "Estoy sin conexión"}. Tenés ${state.routines.filter((r) => r.on).length} rutinas activas. ¿Qué querés automatizar?` }];
+  const draw = () => {
+    el.innerHTML = `<div class="v10"><div class="row"><h1 class="grow">claudino</h1><span class="row sm">${statusLine()}</span></div><div class="log" id="log">${log.map((m) => `<div class="msg ${m.who === "me" ? "me" : "bot"}">${m.html}</div>`).join("")}</div>
+      <div class="sugg">${["todos los días a las 10 actualizá los repos","lun a vie 9 PRs abiertos","¿qué corrió hoy?"].map((s) => `<button class="btn" data-s="${esc(s)}">${esc(s)}</button>`).join("")}</div>
+      <form style="margin-top:12px"><label for="v10i" style="position:absolute;left:-9999px">Mensaje</label><input id="v10i" placeholder="Ej.: todos los días a las 10 actualizá los repos" autocomplete="off"><button class="btn primary">Enviar</button></form></div>`;
+    const send = (text) => {
+      if (!text.trim()) { el.querySelector("#v10i").classList.add("shake"); setTimeout(() => el.querySelector("#v10i")?.classList.remove("shake"), 400); return; }
+      log.push({ who: "me", html: esc(text) });
+      const m = text.match(/(\d{1,2})(?::(\d{2}))?/); const weekdays = /lun a vie|lunes a viernes|hábil/i.test(text);
+      if (/qué corrió|que corrio/i.test(text)) log.push({ who: "bot", html: state.tasks.map((t) => `${stateText(t)} · <b>${esc(t.label)}</b> — ${esc(t.summary)}`).join("<br>") });
+      else if (m) {
+        const time = `${m[1].padStart(2, "0")}:${m[2] || "00"}`; const name = /repo/i.test(text) ? "Actualizar repos" : /pr/i.test(text) ? "PRs abiertos" : text.replace(/.*\d+(:\d+)?\s*/, "").slice(0, 40) || "Nueva rutina";
+        const id = "p" + Date.now(); log.push({ who: "bot", html: `Te propongo:<div class="card" style="margin-top:8px"><b>${esc(name)}</b><div class="sm muted">${time} · ${weekdays ? "lun a vie" : "todos los días"} · resultado por DM</div><div class="row" style="margin-top:8px"><button class="btn primary" data-ok="${id}">Crear rutina</button><button class="btn" data-no>Cambiar</button></div></div>`, pending: { id, name, time, days: weekdays ? [1,2,3,4,5] : [0,1,2,3,4,5,6] } });
+      } else log.push({ who: "bot", html: "No encontré una hora. Decime, por ejemplo: «todos los días a las 10 …»." });
+      draw(); el.querySelector("#log").lastElementChild?.scrollIntoView({ block: "nearest" });
+    };
+    el.querySelector("form").addEventListener("submit", (e) => { e.preventDefault(); send(el.querySelector("#v10i").value); });
+    el.querySelectorAll("[data-s]").forEach((b) => b.addEventListener("click", () => send(b.dataset.s)));
+    el.querySelectorAll("[data-ok]").forEach((b) => b.addEventListener("click", () => { const p = log.find((x) => x.pending?.id === b.dataset.ok).pending; runBtn(b, true, "Creada"); state.routines.push({ id: p.id, name: p.name, prompt: "", time: p.time, days: p.days, dm: true, on: true, last: "nunca", lastOk: true }); setTimeout(() => { log.push({ who: "bot", html: `Listo: «${esc(p.name)}» corre a las ${p.time}. Te aviso por DM.` }); draw(); }, 1000); }));
+    el.querySelectorAll("[data-no]").forEach((b) => b.addEventListener("click", () => el.querySelector("#v10i").focus()));
+    setTimeout(() => el.querySelector("#v10i")?.focus(), 50);
+  };
+  draw();
+}});
+
+// ---------- Switcher ----------
+const tabs = document.getElementById("tabs"), stage = document.getElementById("stage"), bet = document.getElementById("bet");
+tabs.innerHTML = V.map((v, i) => `<button role="tab" id="t${i}" aria-controls="stage" data-i="${i}">${v.name}</button>`).join("");
+let current = -1;
+function show(i, push = true) {
+  i = (i + V.length) % V.length; if (i === current) return;
+  const go = () => {
+    current = i; closeSheet();
+    tabs.querySelectorAll("button").forEach((b, j) => b.setAttribute("aria-selected", j === i));
+    tabs.children[i].scrollIntoView({ block: "nearest", inline: "nearest" });
+    bet.innerHTML = `<span><b>Apuesta:</b> ${V[i].bet}</span><span><b>Costo:</b> ${V[i].tradeoff}</span><span class="kbd">1–0</span> <span class="kbd">← →</span>`;
+    stage.innerHTML = '<div class="version"></div>'; V[i].render(stage.firstElementChild);
+    if (push) history.replaceState(null, "", "#" + (i + 1));
+  };
+  if (document.startViewTransition && !matchMedia("(prefers-reduced-motion: reduce)").matches && current !== -1) document.startViewTransition(go); else go();
+}
+tabs.addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) show(+b.dataset.i); });
+document.addEventListener("keydown", (e) => {
+  if (e.target.matches("input, textarea, select")) return;
+  if (/^[0-9]$/.test(e.key)) show(e.key === "0" ? 9 : +e.key - 1);
+  if (e.key === "ArrowRight") show(current + 1); if (e.key === "ArrowLeft") show(current - 1);
+  if (e.key === "Escape") closeSheet();
+});
+show(Math.max(0, Math.min(9, (parseInt(location.hash.slice(1)) || 1) - 1)), false);
+</script>
+</body>
+</html>
