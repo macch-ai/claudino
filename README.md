@@ -6,7 +6,7 @@
 - **No mention needed once it's in.** After claudino takes part in a thread, teammates' replies reach it unless they mention someone else.
 - **Never duplicates work.** Messages sent while a run is working are queued and handled together by the next run.
 - **Files and forwards.** Images, files and forwarded messages in the thread are downloaded and handed to the session.
-- **Instant feedback.** Every request gets an emoji reaction picked by Claude Haiku, with `:eyes:` as fallback.
+- **Instant feedback.** Every request gets an emoji reaction picked by Claude Haiku, with `:eyes:` as fallback, and the thread shows a loading status with rotating lines Haiku writes for that request until the answer lands. This needs **Agents** > **Agent experience** turned on in the Slack app settings (the manifest does it).
 - **Sentry alerts (optional).** New top-level Sentry alerts in a channel fire a [Claude Code routine](https://docs.claude.com/en/docs/claude-code) that investigates and replies in the alert thread.
 - **Allowlist.** Only the Slack users you list can start runs.
 
@@ -70,6 +70,8 @@ All settings live in `~/.config/claude-relay/env`. [`.env.example`](.env.example
 | `CLAUDINO_PERMISSION_MODE` | `bypassPermissions` | `bypassPermissions` runs `--dangerously-skip-permissions`; anything else goes to `--permission-mode` |
 | `CLAUDINO_EXTRA_PATH` | `~/.local/bin` | Extra `PATH` entries for sessions |
 | `CLAUDINO_PROMPT_SUFFIX` | empty | Text appended to every relayed request |
+| `CLAUDINO_STATUS` | `is working on it...` | Loading status shown in the thread while a run works; `off` hides it |
+| `CLAUDINO_LOADING_MESSAGES` | empty | Fallback loading lines, separated by `\|` (max 10), shown until Haiku's lines for the request are ready or when it fails |
 | `CLAUDINO_TIMEOUT_SECONDS` | `3000` | Kill a run after this long |
 | `CLAUDINO_ALERT_*`, `CLAUDINO_CLAUDE_APP_USER` | empty: off | Sentry alert hand-over, see below |
 

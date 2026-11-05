@@ -6,7 +6,8 @@
   don't need the mention (unless they mention someone else instead).
 - While a run for a thread is working, new requests there are queued and handled
   together by one next run once claudino replies, so work is never duplicated.
-- Each request gets an emoji reaction as soon as it is seen.
+- Each request gets an emoji reaction as soon as it is seen, and the thread shows a
+  loading status with rotating lines Haiku writes for the request until the answer is posted.
 
 On start it catches up on Sentry alerts posted since the last one it saw.
 Settings live in config.py.
@@ -31,6 +32,7 @@ import fire_claude
 
 MAX_CATCH_UP_SECONDS = 24 * 60 * 60  # never replay more than 1 day after an outage
 BUSY_TIMEOUT_SECONDS = 60 * 60  # a run that never replied stops blocking its thread
+STATUS_REFRESH_SECONDS = 90  # Slack clears a thread status after 2 minutes without a reply
 LAST_ALERT_FILE = config.STATE_DIR / "last_alert_ts"
 FILES_DIR = config.STATE_DIR / "files"
 
@@ -143,19 +145,69 @@ def emoji_prompt(text: str) -> str:
     return EMOJI_PROMPT.replace("Reply with only", extra + "Reply with only") + text
 
 
+def clean_request(text: str) -> str:
+    return re.sub(r"\s*\*?Sent using\*?\s*<@[A-Z0-9]+(\|[^>]*)?>\s*$", "", text or "").strip()[:2000]
+
+
+def haiku(prompt: str) -> str:
+    """One quick, tool-less Claude Haiku answer."""
+    proc = subprocess.run(
+        ["claude", "-p", prompt, "--model", "haiku", "--tools", "", "--output-format", "json"],
+        cwd="/tmp", env=claude_cli._env(), capture_output=True, text=True, timeout=20)
+    return json.loads(proc.stdout).get("result", "").strip()
+
+
 def pick_emoji(text: str) -> str:
-    text = re.sub(r"\s*\*?Sent using\*?\s*<@[A-Z0-9]+(\|[^>]*)?>\s*$", "", text or "").strip()[:2000]
+    text = clean_request(text)
     try:
-        proc = subprocess.run(
-            ["claude", "-p", emoji_prompt(text), "--model", "haiku", "--tools", "", "--output-format", "json"],
-            cwd="/tmp", env=claude_cli._env(), capture_output=True, text=True, timeout=20)
-        name = json.loads(proc.stdout).get("result", "").strip().strip(":").lower()
+        name = haiku(emoji_prompt(text)).strip(":").lower()
         if re.fullmatch(r"[a-z0-9_+\-']{1,60}", name):
             return name
         log.warning("emoji pick returned %r", name[:80])
     except Exception as error:
         log.warning("emoji pick failed: %s", error)
     return "eyes"
+
+
+LOADING_PROMPT = (
+    "You are claudino, an engineering assistant in this Slack workspace. A teammate just sent you the message "
+    "below. While you work on it, Slack shows a few rotating status lines under their message. Write 6 of them "
+    "about this specific request, in the order the work would happen: each under 40 characters, present "
+    "progressive (like \"Reading the thread\"), a little playful, in the same language as the message, "
+    "no emoji, no trailing period. Reply with only a JSON array of strings.\n\nMessage:\n"
+)
+
+
+def pick_loading_messages(text: str) -> list | None:
+    """Rotating status lines Haiku writes for this request; None when it fails."""
+    try:
+        answer = haiku(LOADING_PROMPT + clean_request(text))
+        answer = re.sub(r"^```(?:json)?\s*|\s*```$", "", answer)
+        lines = [line.strip() for line in json.loads(answer) if isinstance(line, str) and line.strip()]
+        lines = [line[:60] for line in lines][:10]
+        if lines:
+            return lines
+        log.warning("loading messages pick returned %r", answer[:80])
+    except Exception as error:
+        log.warning("loading messages pick failed: %s", error)
+    return None
+
+
+loading_messages = {}  # thread_ts -> status lines Haiku wrote for the thread's latest request
+status_wake = {}  # thread_ts -> Event that makes a running status refresher update right away
+
+
+def update_loading(thread_ts: str, text: str) -> None:
+    """Write status lines for the request in the background and show them as soon as they are ready."""
+    def go() -> None:
+        lines = pick_loading_messages(text)
+        if lines:
+            loading_messages[thread_ts] = lines
+            wake = status_wake.get(thread_ts)
+            if wake:
+                wake.set()
+    if config.STATUS:
+        threading.Thread(target=go, daemon=True).start()
 
 
 def react(channel: str, ts: str, name: str) -> bool:
@@ -190,8 +242,11 @@ def dispatch(message: dict) -> None:
         if state and time.time() - state["since"] < BUSY_TIMEOUT_SECONDS:
             state["pending"].append((ts, user))
             log.info("queued %s: a run for thread %s is still working", ts, thread_ts)
+            update_loading(thread_ts, message.get("text") or "")
             return
         busy[thread_ts] = {"since": time.time(), "channel": channel, "pending": []}
+        loading_messages.pop(thread_ts, None)  # the last run's lines are about an older request
+    update_loading(thread_ts, message.get("text") or "")
     start(channel, thread_ts, [(ts, user)])
 
 
@@ -262,15 +317,64 @@ def thread_prompt(channel: str, thread_ts: str, requests: list, key: str) -> tup
     return header + "\n".join(lines), last_seen
 
 
+def set_status(channel: str, thread_ts: str, status: str, lines: list | None = None) -> bool:
+    """Show (or clear, with "") the "claudino is working..." shimmer under the thread's last message.
+    Slack rotates through lines, when given, in place of the status text."""
+    try:
+        app.client.assistant_threads_setStatus(
+            channel_id=channel, thread_ts=thread_ts, status=status, loading_messages=lines or None)
+        return True
+    except SlackApiError as error:
+        log.warning("set status in %s failed: %s", thread_ts, error.response.get("error"))
+        return False
+
+
+def show_working(channel: str, thread_ts: str):
+    """Keep the working status up until the returned stop() is called (Slack drops it after 2 minutes).
+    New status lines from update_loading() show right away."""
+    done, wake = threading.Event(), threading.Event()
+
+    def go() -> None:
+        while not done.is_set():
+            lines = loading_messages.get(thread_ts) or config.LOADING_MESSAGES
+            if not set_status(channel, thread_ts, config.STATUS, lines):
+                return
+            wake.wait(STATUS_REFRESH_SECONDS)
+            wake.clear()
+
+    refresher = threading.Thread(target=go, daemon=True)
+
+    def stop() -> None:
+        done.set()
+        wake.set()
+        if refresher.is_alive():
+            refresher.join(timeout=10)  # a status set after the reply would linger for 2 minutes
+        if status_wake.get(thread_ts) is wake:
+            status_wake.pop(thread_ts)
+
+    if config.STATUS:
+        status_wake[thread_ts] = wake
+        refresher.start()
+    return stop
+
+
 def post(channel: str, thread_ts: str, text: str) -> None:
     try:
         app.client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=text[:39000], unfurl_links=False)
     except SlackApiError as error:
         log.error("post in %s failed: %s", thread_ts, error.response.get("error"))
+        if config.STATUS:
+            set_status(channel, thread_ts, "")
         reply_done(thread_ts)
 
 
 def work(channel: str, thread_ts: str, requests: list) -> None:
+    stop_status = show_working(channel, thread_ts)
+
+    def reply(text: str) -> None:
+        stop_status()
+        post(channel, thread_ts, text)
+
     key = f"{channel}:{thread_ts}"
     requesters = " ".join(sorted({f"<@{user}>" for _, user in requests}))
     try:
@@ -289,10 +393,10 @@ def work(channel: str, thread_ts: str, requests: list) -> None:
                 if attempt:
                     raise
                 log.warning("session %s failed, retrying with a new one: %s", key, error)
-        post(channel, thread_ts, answer or f"{requesters} the Claude session ended without an answer.")
+        reply(answer or f"{requesters} the Claude session ended without an answer.")
     except Exception as error:
         log.error("session %s failed: %s", key, error)
-        post(channel, thread_ts, f"{requesters} the Claude session failed: `{str(error)[:300]}`")
+        reply(f"{requesters} the Claude session failed: `{str(error)[:300]}`")
 
 
 def reply_done(thread_ts: str) -> None:

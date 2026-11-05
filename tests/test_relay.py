@@ -109,6 +109,7 @@ class QueueTest(RelayTest):
         super().setUp()
         self.start = mock.patch.object(self.r, "start").start()
         mock.patch.object(self.r, "ack").start()
+        self.update_loading = mock.patch.object(self.r, "update_loading").start()
         self.addCleanup(mock.patch.stopall)
 
     def dispatch(self, ts, thread_ts=None, user=ALICE):
@@ -127,6 +128,13 @@ class QueueTest(RelayTest):
         self.dispatch("101.0", "100.0", BOB)
         self.assertEqual(self.start.call_count, 1)
         self.assertEqual(self.r.busy["100.0"]["pending"], [("101.0", BOB)])
+
+    def test_every_request_gets_its_own_loading_lines(self):
+        self.r.loading_messages["100.0"] = ["Old request"]
+        self.dispatch("100.0")
+        self.assertNotIn("100.0", self.r.loading_messages)
+        self.dispatch("101.0", "100.0", BOB)
+        self.assertEqual(self.update_loading.call_count, 2)
 
     def test_reply_drops_requests_the_run_already_saw(self):
         self.dispatch("100.0")
@@ -225,6 +233,101 @@ class EmojiTest(RelayTest):
             self.r.ack("C1", "1.0", "hi")
         names = [call.kwargs["name"] for call in self.client.reactions_add.call_args_list]
         self.assertEqual(names, ["not_an_emoji", "eyes"])
+
+
+class StatusTest(RelayTest):
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.multiple(self.r.config, STATUS="is working on it...", LOADING_MESSAGES=["Warming up"])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.r.loading_messages.clear()
+        self.r.status_wake.clear()
+        self.calls = []
+        self.client.assistant_threads_setStatus.side_effect = (
+            lambda **kw: self.calls.append(("status", kw["status"], kw["loading_messages"])))
+        self.client.chat_postMessage.side_effect = lambda **kw: self.calls.append(("post", kw["text"]))
+
+    def wait_for(self, condition):
+        for _ in range(200):
+            if condition():
+                return
+            time.sleep(0.01)
+        self.fail("timed out")
+
+    def work(self, run=None):
+        with mock.patch.object(self.r, "thread_prompt", return_value=("prompt", "3.0")), \
+                mock.patch.object(self.r.claude_cli, "run", side_effect=run or (lambda key, prompt: ("done!", False))), \
+                mock.patch.object(self.r.claude_cli, "update"):
+            self.r.work("C1", "1.0", [("1.0", ALICE)])
+
+    def test_status_shows_while_working_and_stops_before_the_answer(self):
+        def run(key, prompt):
+            self.wait_for(lambda: self.calls)
+            return "done!", False
+        self.work(run)
+        self.assertEqual(self.calls, [("status", "is working on it...", ["Warming up"]), ("post", "done!")])
+        kwargs = self.client.assistant_threads_setStatus.call_args.kwargs
+        self.assertEqual((kwargs["channel_id"], kwargs["thread_ts"]), ("C1", "1.0"))
+        self.assertNotIn("1.0", self.r.status_wake)
+
+    def test_haiku_lines_replace_the_fallback_right_away(self):
+        with mock.patch.object(self.r, "pick_loading_messages", return_value=["Reading the thread", "Fixing it"]), \
+                mock.patch.object(self.r, "STATUS_REFRESH_SECONDS", 30):
+            stop = self.r.show_working("C1", "1.0")
+            self.wait_for(lambda: self.calls)
+            self.r.update_loading("1.0", "fix the bug")
+            self.wait_for(lambda: len(self.calls) == 2)
+            stop()
+        self.assertEqual([c[2] for c in self.calls], [["Warming up"], ["Reading the thread", "Fixing it"]])
+
+    def test_lines_ready_after_the_answer_do_not_bring_the_status_back(self):
+        self.work()
+        with mock.patch.object(self.r, "pick_loading_messages", return_value=["Late"]):
+            self.r.update_loading("1.0", "hi")
+            self.wait_for(lambda: "1.0" in self.r.loading_messages)
+        self.assertEqual([c[0] for c in self.calls].count("status"), 1)
+
+    def test_status_off_never_calls_slack(self):
+        with mock.patch.object(self.r.config, "STATUS", ""), \
+                mock.patch.object(self.r, "pick_loading_messages") as pick:
+            self.r.update_loading("1.0", "hi")
+            self.work()
+        pick.assert_not_called()
+        self.client.assistant_threads_setStatus.assert_not_called()
+        self.assertEqual(self.calls, [("post", "done!")])
+
+    def test_failed_post_clears_the_status(self):
+        self.client.chat_postMessage.side_effect = SlackApiError("bad", {"error": "channel_not_found"})
+        with mock.patch.object(self.r, "reply_done"):
+            self.r.post("C1", "1.0", "hi")
+        self.assertEqual(self.client.assistant_threads_setStatus.call_args.kwargs["status"], "")
+
+    def test_unsupported_channel_stops_refreshing(self):
+        self.client.assistant_threads_setStatus.side_effect = SlackApiError(
+            "bad", {"error": "method_not_supported_for_channel_type"})
+        stop = self.r.show_working("C1", "1.0")
+        self.wait_for(lambda: self.client.assistant_threads_setStatus.call_count)
+        stop()
+        self.assertEqual(self.client.assistant_threads_setStatus.call_count, 1)
+
+
+class LoadingMessagesTest(RelayTest):
+    def pick(self, result):
+        with mock.patch.object(self.r, "haiku", return_value=result):
+            return self.r.pick_loading_messages("arreglá el bug del login")
+
+    def test_parses_a_json_array(self):
+        self.assertEqual(self.pick('["Leyendo el hilo", "Buscando el bug"]'), ["Leyendo el hilo", "Buscando el bug"])
+
+    def test_strips_code_fences_and_caps_lines(self):
+        lines = self.pick("```json\n" + str(["x" * 80] * 12).replace("'", '"') + "\n```")
+        self.assertEqual(len(lines), 10)
+        self.assertEqual(len(lines[0]), 60)
+
+    def test_bad_answer_gives_none(self):
+        self.assertIsNone(self.pick("Sure! Here are some lines"))
+        self.assertIsNone(self.pick("[]"))
 
 
 if __name__ == "__main__":
