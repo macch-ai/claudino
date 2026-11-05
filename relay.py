@@ -96,6 +96,14 @@ def claudino_in_thread(channel: str, thread_ts: str) -> bool:
     return seen
 
 
+def from_trusted_agent(message: dict) -> bool:
+    """A trusted agent's own message (not an edit or join) that mentions claudino."""
+    return (message.get("app_id") in config.TRUSTED_AGENT_APPS
+            and message.get("subtype") in (None, "bot_message")
+            and bool(message.get("user"))
+            and f"<@{RELAY_USER_ID}>" in (message.get("text") or ""))
+
+
 def addressed_to_claudino(message: dict) -> bool:
     text = message.get("text") or ""
     channel = message.get("channel")
@@ -321,6 +329,10 @@ def on_message(event: dict) -> None:
     if is_from_claudino(event):
         if event.get("thread_ts"):
             reply_done(event["thread_ts"])
+        return
+    if from_trusted_agent(event):
+        log.info("request %s from agent %s", event.get("ts"), event.get("app_id"))
+        dispatch(event)
         return
     if event.get("subtype") or event.get("bot_id") or not event.get("user"):
         return

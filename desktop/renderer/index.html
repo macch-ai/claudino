@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://avatars.slack-edge.com https://secure.gravatar.com https://*.wp.com">
+  <title>MACCH Agent</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="drag"></div>
+    <div class="profile">
+      <img class="avatar" id="avatar-img" alt="" hidden>
+      <div class="avatar" id="avatar">··</div>
+      <div>
+        <div class="name" id="profile-name"></div>
+        <div class="sub" id="profile-org">Comprobando…</div>
+      </div>
+    </div>
+    <nav>
+      <button class="nav active" data-page="general">
+        <span class="icon gray"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></span>
+        General
+      </button>
+      <button class="nav" data-page="connection">
+        <span class="icon green"><svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-.5.5"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l.5-.5"/></svg></span>
+        Conexión <span class="dot" id="nav-dot"></span>
+      </button>
+      <button class="nav" data-page="tasks">
+        <span class="icon blue"><svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/></svg></span>
+        Tareas <span class="badge" id="nav-running" hidden></span>
+      </button>
+      <button class="nav" data-page="automations">
+        <span class="icon purple"><svg viewBox="0 0 24 24"><path d="M13 3L4 14h7l-1 7 9-11h-7z"/></svg></span>
+        Automatizaciones
+      </button>
+    </nav>
+    <button class="nav about" data-page="about">
+      <span class="icon gray"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></span>
+      Acerca de
+    </button>
+  </aside>
+
+  <main>
+    <div class="drag"></div>
+
+    <section class="page" id="page-general">
+      <h1>General</h1>
+      <h2>Cuenta de Claude</h2>
+      <div class="card row">
+        <div class="avatar big" id="account-avatar">··</div>
+        <div class="grow">
+          <div class="name" id="account-name">Comprobando login…</div>
+          <div class="sub" id="account-email"></div>
+        </div>
+        <button class="btn" id="open-usage">Ver uso</button>
+        <button class="btn danger" id="logout">Cerrar sesión</button>
+      </div>
+      <p class="hint" id="account-hint">Los pedidos de Slack corren con esta cuenta: consumen tu asiento del plan Team, no una cuenta compartida.</p>
+      <h2>Apariencia</h2>
+      <div class="themes" role="radiogroup" aria-label="Tema">
+        <label class="theme" data-preview="system"><input type="radio" name="theme" value="system"><span class="swatch"><i></i><i></i></span><span>Sistema</span><span class="sub">Como tu Mac</span></label>
+        <label class="theme" data-preview="light"><input type="radio" name="theme" value="light"><span class="swatch"><i></i><i></i></span><span>Claro</span></label>
+        <label class="theme" data-preview="dark"><input type="radio" name="theme" value="dark"><span class="swatch"><i></i><i></i></span><span>Oscuro</span></label>
+        <label class="theme" data-preview="retro"><input type="radio" name="theme" value="retro"><span class="swatch"><i></i><i></i></span><span>Retro</span><span class="sub">Mac clásico</span></label>
+      </div>
+      <h2>App</h2>
+      <div class="card">
+        <label class="row toggle-row">
+          <span class="grow">Abrir al iniciar sesión</span>
+          <input type="checkbox" class="switch" id="launch-at-login">
+        </label>
+      </div>
+    </section>
+
+    <section class="page" id="page-connection" hidden>
+      <h1>Conexión</h1>
+      <h2>Slack</h2>
+
+      <!-- Linked: Slack profile + connection status -->
+      <div class="card row" id="slack-linked" hidden>
+        <img class="avatar big" id="slack-avatar" alt="" hidden>
+        <div class="avatar big" id="slack-initials" hidden></div>
+        <div class="grow">
+          <div class="name" id="slack-name"></div>
+          <div class="sub" id="slack-handle"></div>
+        </div>
+        <button class="btn danger" id="unpair">Desvincular</button>
+      </div>
+
+      <!-- Not linked: pairing code -->
+      <div class="card pair" id="slack-pair" hidden>
+        <div class="pair-step" id="pair-waiting">
+          <div class="row" id="pair-login">
+            <div class="grow">
+              <div class="name">Vincular con Slack</div>
+              <div class="sub">Se abre el navegador; confirmás con tu cuenta de Slack y la app se conecta sola.</div>
+            </div>
+            <button class="btn primary" id="login-slack">Iniciar sesión con Slack</button>
+          </div>
+          <div class="sub" id="pair-alt-label">Escribí esto en cualquier canal donde esté Machine AI:</div>
+          <div class="pair-command">
+            <code id="pair-command">@Machine AI vincular ···-···</code>
+            <button class="btn" id="copy-pair">Copiar</button>
+          </div>
+          <div class="sub" id="pair-expiry"></div>
+        </div>
+        <div class="pair-step row" id="pair-retry" hidden>
+          <div class="grow">
+            <div class="name" id="pair-retry-title"></div>
+            <div class="sub" id="pair-retry-detail"></div>
+          </div>
+          <button class="btn primary" id="new-code">Pedir código</button>
+        </div>
+      </div>
+
+      <h2>Servidor</h2>
+      <div class="card row">
+        <span class="status-dot" id="hub-dot"></span>
+        <div class="grow">
+          <div class="name" id="hub-title">Conectando…</div>
+          <div class="sub" id="hub-detail"></div>
+        </div>
+      </div>
+      <details class="advanced">
+        <summary>Avanzado</summary>
+        <form class="card form" id="url-form">
+          <label>URL del servidor<input name="url" required pattern="wss?://\S+"></label>
+          <div class="row end"><button class="btn" type="submit">Guardar</button></div>
+        </form>
+      </details>
+      <h2>Probar Claude en esta Mac</h2>
+      <div class="card form">
+        <textarea id="prompt">Decí hola en una línea.</textarea>
+        <div class="row end"><button class="btn" id="send">Probar</button></div>
+        <pre id="out" hidden></pre>
+      </div>
+    </section>
+
+    <section class="page" id="page-tasks" hidden>
+      <h1>Tareas</h1>
+      <p class="hint">Pedidos de Slack que corrieron en esta Mac desde que abriste la app.</p>
+      <div class="card list" id="tasks"></div>
+    </section>
+
+    <section class="page" id="page-automations" hidden>
+      <div class="row">
+        <h1 class="grow">Automatizaciones</h1>
+        <button class="btn primary" id="new-automation">Nueva rutina</button>
+      </div>
+      <p class="hint top">Prompts guardados que Claude Code ejecuta en esta Mac, con tu cuenta: por horario mientras la app esté abierta, o desde Slack con <code>@Machine AI ejecutá &lt;nombre&gt;</code>. Si a la hora de una rutina la Mac estaba apagada, corre apenas vuelve.</p>
+      <div class="tiles" id="automations"></div>
+    </section>
+
+    <!-- Automation editor: a side panel over the cards (design 3, "Tarjetas") -->
+    <div class="sheet-bg" id="automation-sheet-bg"></div>
+    <aside class="sheet" id="automation-sheet" role="dialog" aria-modal="true" aria-labelledby="automation-sheet-title" aria-hidden="true">
+      <div class="row">
+        <h2 class="grow" id="automation-sheet-title">Nueva rutina</h2>
+        <button class="btn ghost" type="button" id="close-automation" aria-label="Cerrar">✕</button>
+      </div>
+      <form class="form" id="automation-form">
+        <input type="hidden" name="id">
+        <label>Nombre<input name="name" required placeholder="PRs abiertos"></label>
+        <label>Prompt<textarea name="prompt" required placeholder="Listá los PRs abiertos de macch-core con su estado de CI y quién los tiene que revisar."></textarea></label>
+        <label>Cuándo
+          <select name="kind">
+            <option value="daily">Todos los días a una hora</option>
+            <option value="interval">Cada cierta cantidad de minutos</option>
+            <option value="slack">Solo desde Slack</option>
+          </select>
+        </label>
+        <div class="row" id="daily-fields">
+          <label>Hora<input name="time" type="time" value="09:00"></label>
+          <div class="days" id="days"></div>
+        </div>
+        <label id="interval-fields" hidden>Cada (minutos)<input name="minutes" type="number" min="1" value="60"></label>
+        <label class="row toggle-row"><span class="grow">Mandarme el resultado por DM en Slack</span><input type="checkbox" class="switch" name="dm" checked></label>
+        <label>Publicarlo también en un canal (ID de canal, opcional)<input name="channel" placeholder="C0C7YJPATEK" pattern="[CDG][A-Z0-9]+"></label>
+        <label class="row toggle-row"><span class="grow">Activada</span><input type="checkbox" class="switch" name="enabled" checked></label>
+        <div class="row end">
+          <button class="btn danger" type="button" id="delete-automation" hidden>Borrar</button>
+          <span class="grow"></span>
+          <button class="btn" type="button" id="cancel-automation">Cancelar</button>
+          <button class="btn primary" type="submit">Guardar</button>
+        </div>
+        <div class="err" id="automation-error" role="alert"></div>
+      </form>
+    </aside>
+
+    <section class="page" id="page-about" hidden>
+      <h1>Acerca de</h1>
+      <div class="card">
+        <div class="name">MACCH Agent</div>
+        <div class="sub" id="version"></div>
+        <p class="hint">Corre en esta Mac los pedidos que le hacés a @Machine AI en Slack, con tu login de Claude Code. El servidor de Machine AI (en Cloudflare) solo recibe de Slack y te pasa el pedido.</p>
+        <button class="btn" id="open-repo">Ver repositorio</button>
+      </div>
+    </section>
+  </main>
+  <script src="renderer.js"></script>
+</body>
+</html>

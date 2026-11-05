@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Automatizaciones · 10 versiones</title>
+<style>
+:root {
+  --bg: #ecebe8; --win: #fbfaf8; --side: #f1efec; --surface: #ffffff; --surface-2: #f3f1ee; --border: #e3e0dc; --text: #1c1b1a; --muted: #6b6762;
+  --accent: #c4613f; --accent-ink: #ffffff; --green: #2f8f4a; --blue: #2f6fd1; --purple: #7b55d6; --amber: #a86b0c; --danger: #c43c3c; --danger-bg: #fbeaea; --focus: #2f6fd1;
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --r1: 8px; --r2: 12px; --r3: 16px;
+  --f-sm: 12.5px; --f: 14px; --f-lg: 17px; --f-xl: 22px; --ease: cubic-bezier(.2,.8,.2,1);
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0e0e0e; --win: #161616; --side: #1d1d1d; --surface: #1e1e1e; --surface-2: #262626; --border: #2e2e2e; --text: #f2f2f2; --muted: #a3a09c;
+    --accent: #e0805f; --accent-ink: #1a0f0a; --green: #5cc977; --blue: #6aa6f8; --purple: #a98cf0; --amber: #e8b04a; --danger: #f07a7a; --danger-bg: #3a1f1f; --focus: #8ab8ff; }
+}
+* { box-sizing: border-box; } [hidden] { display: none !important; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font: var(--f)/1.45 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+h1, h2, h3 { margin: 0; line-height: 1.2; } h1 { font-size: var(--f-xl); } h2 { font-size: var(--f-lg); } h3 { font-size: var(--f); }
+.muted { color: var(--muted); } .sm { font-size: var(--f-sm); } .num { font-variant-numeric: tabular-nums; text-align: right; }
+.row { display: flex; align-items: center; gap: var(--s3); } .wrap { flex-wrap: wrap; } .grow { flex: 1; min-width: 0; } .stack > * + * { margin-top: var(--s3); }
+.sr { position: absolute; left: -9999px; }
+
+/* Switcher */
+.switcher { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border); padding: var(--s2) var(--s4); }
+.tabs { display: flex; gap: var(--s1); overflow-x: auto; scrollbar-width: none; }
+.tabs button { flex: 0 0 auto; min-height: 36px; padding: 0 var(--s3); border-radius: 999px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; font-size: var(--f-sm); transition: transform .15s var(--ease); }
+.tabs button:active { transform: scale(.96); } .tabs button[aria-selected="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+.bet { margin-top: var(--s2); font-size: var(--f-sm); display: flex; gap: var(--s4); flex-wrap: wrap; color: var(--muted); } .bet b { color: var(--text); }
+.stage { padding: var(--s5) var(--s4) 80px; max-width: 1180px; margin: 0 auto; }
+
+/* App frame (the real window: sidebar + content) */
+.win { display: grid; grid-template-columns: 232px 1fr; min-height: 640px; background: var(--win); border: 1px solid var(--border); border-radius: 14px; overflow: clip; box-shadow: 0 20px 60px rgb(0 0 0 / .18); }
+.side { background: var(--side); border-right: 1px solid var(--border); padding: var(--s3); display: flex; flex-direction: column; gap: 2px; }
+.lights { display: flex; gap: 8px; padding: 6px 6px 18px; } .lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; } .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+.me { display: flex; gap: var(--s3); align-items: center; padding: 0 6px 16px; }
+.avatar { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: linear-gradient(135deg, #d97757, #7b55d6); color: #fff; font-weight: 700; font-size: 12px; flex: 0 0 auto; }
+.navi { min-height: 40px; display: flex; align-items: center; gap: var(--s3); padding: 0 var(--s2); border-radius: 10px; color: var(--muted); }
+.navi.on { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / .06); }
+.ico { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; color: #fff; font-size: 12px; }
+.content { padding: var(--s5); min-width: 0; position: relative; animation: enter .3s var(--ease); }
+@keyframes enter { from { opacity: 0; transform: translateY(8px); } }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .25s; }
+
+/* Atoms */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r2); padding: var(--s4); }
+.btn { min-height: 40px; padding: 0 var(--s4); border-radius: var(--r1); border: 1px solid var(--border); background: var(--surface-2); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: var(--s2); transition: transform .12s var(--ease), background .2s; white-space: nowrap; }
+.btn:hover { filter: brightness(.97); } .btn:active { transform: scale(.97); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
+.btn.danger { color: var(--danger); background: var(--danger-bg); border-color: transparent; }
+.btn.ghost { background: transparent; border-color: transparent; } .btn.sm { min-height: 32px; padding: 0 var(--s3); font-size: var(--f-sm); }
+.btn[aria-busy="true"] { opacity: .75; pointer-events: none; }
+.btn[aria-busy="true"]::before { content: ""; width: 13px; height: 13px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin .7s linear infinite; }
+.btn.ok { background: var(--green); color: #fff; border-color: transparent; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.shake { animation: shake .35s var(--ease); } @keyframes shake { 20%, 60% { transform: translateX(-5px); } 40%, 80% { transform: translateX(5px); } }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: 0 0 auto; }
+.dot.ok { background: var(--green); } .dot.run { background: var(--amber); animation: pulse 1.2s ease-in-out infinite; } .dot.bad { background: var(--danger); } .dot.off { background: transparent; border: 2px solid var(--muted); }
+@keyframes pulse { 50% { opacity: .35; } }
+.tag { font-size: 11.5px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+.tag.bad { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+.switch { appearance: none; width: 42px; height: 26px; border-radius: 13px; background: var(--border); position: relative; cursor: pointer; flex: 0 0 auto; transition: background .2s var(--ease); margin: 0; }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgb(0 0 0 / .25); transition: transform .2s var(--ease); }
+.switch:checked { background: var(--green); } .switch:checked::after { transform: translateX(16px); }
+.field { display: flex; flex-direction: column; gap: var(--s1); font-size: var(--f-sm); color: var(--muted); }
+.field input, .field textarea, .field select, .cell { min-height: 40px; padding: var(--s2) var(--s3); border-radius: var(--r1); border: 1px solid var(--border); background: var(--surface-2); color: var(--text); font-size: var(--f); }
+.field textarea { min-height: 96px; resize: vertical; } .err { color: var(--danger); min-height: 1em; font-size: var(--f-sm); }
+.days { display: flex; gap: 6px; flex-wrap: wrap; }
+.days button { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--border); background: var(--surface-2); cursor: pointer; font-size: 12px; transition: background .15s, transform .12s; }
+.days button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; } .days button:active { transform: scale(.92); }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: var(--r1); overflow: hidden; }
+.seg button { min-height: 36px; padding: 0 var(--s3); border: 0; background: var(--surface); cursor: pointer; font-size: var(--f-sm); } .seg button[aria-pressed="true"] { background: var(--text); color: var(--bg); }
+.list > * + * { border-top: 1px solid var(--border); } .item { display: flex; gap: var(--s3); align-items: center; padding: var(--s3) var(--s4); }
+.result { font: 12px/1.5 ui-monospace, Menlo, monospace; background: var(--surface-2); border-radius: var(--r1); padding: var(--s2) var(--s3); white-space: pre-wrap; color: var(--text); }
+.empty { padding: var(--s6) var(--s4); text-align: center; color: var(--muted); }
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px); opacity: 0; background: var(--text); color: var(--bg); padding: var(--s3) var(--s4); border-radius: var(--r2); transition: transform .25s var(--ease), opacity .25s; z-index: 60; max-width: calc(100% - 32px); }
+.toast.show { transform: translate(-50%, 0); opacity: 1; }
+.stagger > * { animation: enter .3s var(--ease) both; } .stagger > *:nth-child(2) { animation-delay: 40ms; } .stagger > *:nth-child(3) { animation-delay: 80ms; } .stagger > *:nth-child(4) { animation-delay: 120ms; } .stagger > *:nth-child(n+5) { animation-delay: 160ms; }
+.sheet-bg { position: absolute; inset: 0; background: rgb(0 0 0 / .35); opacity: 0; pointer-events: none; transition: opacity .25s; z-index: 30; }
+.sheet-bg.open { opacity: 1; pointer-events: auto; }
+.sheet { position: absolute; top: 0; right: 0; bottom: 0; width: min(440px, 100%); background: var(--win); border-left: 1px solid var(--border); padding: var(--s5); transform: translateX(100%); transition: transform .3s var(--ease); z-index: 31; overflow-y: auto; }
+.sheet.open { transform: none; }
+.kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px; padding: 1px 5px; color: var(--muted); }
+
+/* Version-specific */
+.v1 details { transition: background .2s; } .v1 details[open] { background: var(--surface-2); } .v1 summary { list-style: none; cursor: pointer; } .v1 summary::-webkit-details-marker { display: none; }
+.v1 details[open] .ed { animation: enter .25s var(--ease); }
+.v2 { display: grid; grid-template-columns: 260px 1fr; gap: var(--s4); }
+.v2 .lst button { all: unset; box-sizing: border-box; width: 100%; display: flex; gap: var(--s3); align-items: center; padding: var(--s3); border-radius: var(--r1); cursor: pointer; min-height: 52px; }
+.v2 .lst button[aria-current="true"] { background: var(--surface); box-shadow: inset 3px 0 0 var(--accent), 0 1px 2px rgb(0 0 0 / .05); } .v2 .lst button:focus-visible { outline: 2px solid var(--focus); }
+.v3 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--s4); }
+.v3 .tile { display: flex; flex-direction: column; gap: var(--s3); transition: transform .15s var(--ease), box-shadow .2s; } .v3 .tile:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgb(0 0 0 / .08); }
+.v3 .new { border-style: dashed; display: grid; place-items: center; min-height: 180px; cursor: pointer; color: var(--muted); background: transparent; }
+.v4 .wk { display: grid; grid-template-columns: 48px repeat(7, 1fr); border: 1px solid var(--border); border-radius: var(--r2); overflow: hidden; background: var(--surface); }
+.v4 .wk > div { border-top: 1px solid var(--border); border-left: 1px solid var(--border); min-height: 40px; position: relative; }
+.v4 .hd { min-height: 32px !important; display: grid; place-items: center; font-size: var(--f-sm); color: var(--muted); border-top: 0 !important; }
+.v4 .h { font-size: 11px; color: var(--muted); padding: 2px 6px; border-left: 0 !important; text-align: right; }
+.v4 .slot { all: unset; position: absolute; inset: 0; cursor: pointer; } .v4 .slot:hover { background: var(--surface-2); } .v4 .slot:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.v4 .ev { position: absolute; inset: 3px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 18%, var(--surface)); border-left: 3px solid var(--accent); font-size: 11px; padding: 2px 6px; overflow: hidden; pointer-events: none; }
+.v4 .ev.bad { background: color-mix(in srgb, var(--danger) 16%, var(--surface)); border-left-color: var(--danger); }
+.v5 .tl { position: relative; padding-left: 64px; } .v5 .tl::before { content: ""; position: absolute; left: 50px; top: 8px; bottom: 8px; width: 2px; background: var(--border); }
+.v5 .tlev { position: relative; padding: var(--s3) 0; } .v5 .tlev .t { position: absolute; left: -64px; width: 44px; text-align: right; font-size: var(--f-sm); color: var(--muted); top: 14px; }
+.v5 .tlev .dot { position: absolute; left: -18px; top: 18px; } .v5 .nowline { position: relative; margin: var(--s2) 0; height: 2px; background: var(--danger); } .v5 .nowline span { position: absolute; left: -64px; top: -9px; font-size: 11px; color: var(--danger); font-weight: 700; }
+.v6 .steps { display: flex; gap: var(--s2); } .v6 .steps span { flex: 1; height: 4px; border-radius: 2px; background: var(--border); position: relative; overflow: hidden; }
+.v6 .steps span::after { content: ""; position: absolute; inset: 0; background: var(--accent); transform: scaleX(0); transform-origin: left; transition: transform .35s var(--ease); } .v6 .steps span.done::after { transform: scaleX(1); }
+.v6 .pane { animation: slide .3s var(--ease); } @keyframes slide { from { opacity: 0; transform: translateX(20px); } }
+.v7 .tpls { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--s3); }
+.v7 .tpl { text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: var(--s2); min-height: 132px; transition: transform .15s var(--ease), border-color .2s; } .v7 .tpl:hover { transform: translateY(-2px); border-color: var(--accent); }
+.v7 .emoji { font-size: 22px; }
+.v8 table { width: 100%; border-collapse: collapse; font-size: var(--f-sm); } .v8 th, .v8 td { padding: var(--s2); border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
+.v8 th { color: var(--muted); font-weight: 600; } .v8 .cell { min-height: 34px; padding: 4px 8px; font-size: var(--f-sm); } .v8 .days button { width: 28px; height: 28px; font-size: 11px; } .v8 .tw { overflow-x: auto; }
+.v9 .nl { width: 100%; min-height: 56px; font-size: var(--f-lg); padding: var(--s3) var(--s4); border-radius: var(--r2); border: 1px solid var(--border); background: var(--surface); }
+.v9 .chips { display: flex; gap: var(--s2); flex-wrap: wrap; } .v9 .chip { padding: 6px 10px; border-radius: 999px; background: var(--surface-2); font-size: var(--f-sm); transition: background .2s, color .2s; } .v9 .chip.hit { background: color-mix(in srgb, var(--green) 20%, var(--surface)); color: var(--text); } .v9 .chip.miss { color: var(--danger); }
+.v10 .cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s4); align-items: start; }
+.v10 .col { background: var(--surface-2); border-radius: var(--r2); padding: var(--s3); min-height: 300px; } .v10 .col h2 { font-size: var(--f); display: flex; gap: var(--s2); align-items: center; margin-bottom: var(--s3); }
+.v10 .k { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r1); padding: var(--s3); margin-bottom: var(--s2); animation: enter .25s var(--ease); }
+
+@media (max-width: 760px) {
+  .win { grid-template-columns: 1fr; } .side { flex-direction: row; overflow-x: auto; padding: var(--s2); } .side .lights, .side .me, .side .navi:not(.on) span:last-child { display: none; }
+  .content { padding: var(--s4); } .v2 { grid-template-columns: 1fr; } .v10 .cols { grid-template-columns: 1fr; } .v4 .wk { grid-template-columns: 34px repeat(7, minmax(30px, 1fr)); font-size: 10px; }
+  .stage { padding: var(--s3) var(--s3) 80px; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } ::view-transition-old(root), ::view-transition-new(root) { animation: none !important; } }
+</style>
+</head>
+<body>
+<header class="switcher"><div class="tabs" role="tablist" aria-label="Versiones" id="tabs"></div><div class="bet" id="bet"></div></header>
+<main class="stage" id="stage"></main>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script>
+// ---------- Data: same shape as desktop/src/automations.ts ----------
+const NOW = new Date("2026-11-04T11:20");
+const seed = () => [
+  { id: "repos", name: "Actualizar repos", prompt: "Actualizá ~/code/macch-core y ~/code/macch-hub: git fetch --prune; si están en la rama base y sin cambios, git pull --ff-only. Una línea por repo.", schedule: { kind: "daily", time: "10:00", days: [0,1,2,3,4,5,6] }, dm: true, channel: "", enabled: true,
+    last: { at: "hoy 10:00", ok: true, text: "macch-core · master · 3 commits nuevos\nmacch-hub · macch-production · ya estaba al día" } },
+  { id: "prs", name: "PRs abiertos", prompt: "Listá los PRs abiertos de macch-core y macch-hub con su estado de CI y quién los tiene que revisar.", schedule: { kind: "daily", time: "09:00", days: [1,2,3,4,5] }, dm: true, channel: "", enabled: true,
+    last: { at: "hoy 09:00", ok: true, text: "4 PRs abiertos · 1 con CI rojo (#612 macch-hub) · 2 esperan review de Facundo" } },
+  { id: "sentry", name: "Errores nuevos de Sentry", prompt: "Resumí los errores nuevos de las últimas 24 h en #production-errors y si alguno se repite.", schedule: { kind: "daily", time: "18:30", days: [1,2,3,4,5] }, dm: false, channel: "C0C7YJPATEK", enabled: true,
+    last: { at: "ayer 18:30", ok: false, text: "claude failed: timeout after 50 min" } },
+  { id: "backup", name: "Chequear backups", prompt: "Confirmá que el backup nocturno de la base de producción terminó bien.", schedule: { kind: "interval", minutes: 360 }, dm: true, channel: "", enabled: false, last: null },
+];
+let routines = seed();
+const DAYS = ["D","L","M","M","J","V","S"], ORDER = [1,2,3,4,5,6,0], DAYNAME = ["dom","lun","mar","mié","jue","vie","sáb"];
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const daysText = (d) => d.length === 7 ? "todos los días" : d.length === 5 && [1,2,3,4,5].every((x) => d.includes(x)) ? "lun a vie" : ORDER.filter((x) => d.includes(x)).map((x) => DAYNAME[x]).join(", ");
+const when = (r) => r.schedule.kind === "daily" ? `${r.schedule.time} · ${daysText(r.schedule.days)}` : r.schedule.kind === "interval" ? `cada ${r.schedule.minutes >= 60 ? r.schedule.minutes / 60 + " h" : r.schedule.minutes + " min"}` : "solo desde Slack";
+const where = (r) => [r.dm ? "DM" : "", r.channel ? "#production-errors" : ""].filter(Boolean).join(" + ") || "sin aviso";
+const status = (r) => !r.enabled ? "off" : r.last && !r.last.ok ? "bad" : "ok";
+function nextRun(r) {
+  if (!r.enabled || r.schedule.kind === "slack") return "—";
+  if (r.schedule.kind === "interval") return "en 2 h";
+  const [h, m] = r.schedule.time.split(":").map(Number);
+  for (let i = 0; i < 8; i++) { const d = new Date(NOW); d.setDate(d.getDate() + i); d.setHours(h, m, 0, 0); if (r.schedule.days.includes(d.getDay()) && d > NOW) return i === 0 ? `hoy ${r.schedule.time}` : i === 1 ? `mañana ${r.schedule.time}` : `${DAYNAME[d.getDay()]} ${r.schedule.time}`; }
+  return "—";
+}
+
+// ---------- Helpers ----------
+function toast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 2200); }
+function busy(btn, ok, label, after) {
+  const html = btn.innerHTML; btn.setAttribute("aria-busy", "true");
+  setTimeout(() => { btn.removeAttribute("aria-busy");
+    if (ok) { btn.classList.add("ok"); btn.textContent = "✓ " + label; setTimeout(() => { btn.classList.remove("ok"); btn.innerHTML = html; after && after(); }, 1100); }
+    else { btn.innerHTML = html; btn.classList.add("shake"); setTimeout(() => btn.classList.remove("shake"), 400); } }, 800);
+}
+function runNow(btn, r, rerender) {
+  busy(btn, true, "Enviada", () => { r.last = { at: "ahora", ok: true, text: r.id === "repos" ? "macch-core · master · ya estaba al día\nmacch-hub · macch-production · 1 commit nuevo" : "Listo." }; toast(`${r.name}: el resultado te llega por ${where(r)}`); rerender && rerender(); });
+}
+function toggle(r, on, rerender) { r.enabled = on; toast(`${r.name} ${on ? "activada" : "pausada"}`); rerender && rerender(); }
+function blank() { return { id: "r" + Math.random().toString(36).slice(2, 7), name: "", prompt: "", schedule: { kind: "daily", time: "10:00", days: [1,2,3,4,5] }, dm: true, channel: "", enabled: true, last: null }; }
+
+// Shared editor: the real fields of an automation. Returns HTML; wire(form, r, onSave, onDelete) binds it.
+function editorHTML(r, { title = r.name || "Nueva rutina", compact = false } = {}) {
+  const s = r.schedule;
+  return `<form class="stack" novalidate>
+    ${compact ? "" : `<h2>${esc(title)}</h2>`}
+    <label class="field">Nombre <span class="sr">(se usa en «@Usage Bot ejecutá»)</span><input name="name" value="${esc(r.name)}" placeholder="Actualizar repos"><span class="err" data-e="name"></span></label>
+    <label class="field">Qué tiene que hacer Claude<textarea name="prompt" placeholder="Actualizá macch-core y macch-hub…">${esc(r.prompt)}</textarea><span class="err" data-e="prompt"></span></label>
+    <div class="field">Cuándo<div class="seg" role="group" aria-label="Tipo de horario">${[["daily","Diario"],["interval","Cada X"],["slack","Solo Slack"]].map(([k,l]) => `<button type="button" data-kind="${k}" aria-pressed="${s.kind===k}">${l}</button>`).join("")}</div></div>
+    <div class="row wrap" data-when="daily" ${s.kind==="daily"?"":"hidden"}><label class="field">Hora<input type="time" name="time" value="${s.time || "10:00"}"></label><div class="field">Días<div class="days">${ORDER.map((d) => `<button type="button" data-day="${d}" aria-pressed="${(s.days||[]).includes(d)}" aria-label="${DAYNAME[d]}">${DAYS[d]}</button>`).join("")}</div><span class="err" data-e="days"></span></div></div>
+    <label class="field" data-when="interval" ${s.kind==="interval"?"":"hidden"}>Cada (minutos)<input type="number" min="5" name="minutes" value="${s.minutes || 60}"></label>
+    <p class="sm muted" data-when="slack" ${s.kind==="slack"?"":"hidden"}>Corre solo cuando escribís <b>@Usage Bot ejecutá ${esc(r.name || "<nombre>")}</b>.</p>
+    <label class="row card" style="padding:10px 14px"><span class="grow">Mandarme el resultado por DM</span><input type="checkbox" class="switch" name="dm" ${r.dm?"checked":""}></label>
+    <label class="field">También publicarlo en un canal (opcional)<input name="channel" value="${esc(r.channel)}" placeholder="ID de canal, ej. C0C7YJPATEK"><span class="err" data-e="channel"></span></label>
+    <div class="row"><button class="btn primary" type="submit">Guardar</button><button class="btn" type="button" data-act="run">Ejecutar ahora</button><span class="grow"></span>${routines.includes(r) ? '<button class="btn danger" type="button" data-act="del">Borrar</button>' : ""}</div>
+  </form>`;
+}
+function wire(form, r, onSave, onDelete) {
+  let kind = r.schedule.kind, days = new Set(r.schedule.days || [1,2,3,4,5]);
+  form.querySelectorAll("[data-kind]").forEach((b) => b.addEventListener("click", () => { kind = b.dataset.kind; form.querySelectorAll("[data-kind]").forEach((x) => x.setAttribute("aria-pressed", x === b)); form.querySelectorAll("[data-when]").forEach((x) => (x.hidden = x.dataset.when !== kind)); }));
+  form.querySelectorAll("[data-day]").forEach((b) => b.addEventListener("click", () => { const d = +b.dataset.day; days.has(d) ? days.delete(d) : days.add(d); b.setAttribute("aria-pressed", days.has(d)); }));
+  form.querySelector('[data-act="run"]').addEventListener("click", (e) => { if (!routines.includes(r)) { toast("Guardala primero"); busy(e.currentTarget, false); return; } runNow(e.currentTarget, r); });
+  form.querySelector('[data-act="del"]')?.addEventListener("click", () => { if (!confirm(`¿Borrar «${r.name}»?`)) return; routines = routines.filter((x) => x !== r); toast("Rutina borrada"); onDelete && onDelete(); });
+  form.addEventListener("submit", (e) => {
+    e.preventDefault(); const f = form.elements; const set = (k, m) => (form.querySelector(`[data-e="${k}"]`).textContent = m);
+    const name = f.name.value.trim(), prompt = f.prompt.value.trim(), channel = f.channel.value.trim();
+    set("name", !name ? "Ponele un nombre: así la pedís desde Slack." : routines.some((x) => x !== r && x.name.toLowerCase() === name.toLowerCase()) ? "Ya hay una rutina con ese nombre." : "");
+    set("prompt", prompt ? "" : "Escribí qué tiene que hacer Claude."); set("days", kind === "daily" && !days.size ? "Elegí al menos un día." : "");
+    set("channel", channel && !/^[CG][A-Z0-9]+$/.test(channel) ? "Usá el ID del canal (empieza con C)." : "");
+    if (!f.dm.checked && !channel && kind !== "slack") set("channel", "Sin DM ni canal no te enterás del resultado.");
+    const btn = form.querySelector("[type=submit]");
+    if ([...form.querySelectorAll(".err")].some((x) => x.textContent)) { busy(btn, false); return; }
+    Object.assign(r, { name, prompt, channel, dm: f.dm.checked, schedule: kind === "daily" ? { kind, time: f.time.value, days: [...days].sort() } : kind === "interval" ? { kind, minutes: Math.max(5, +f.minutes.value || 60) } : { kind } });
+    if (!routines.includes(r)) routines.push(r);
+    busy(btn, true, "Guardada", () => onSave && onSave(r));
+  });
+}
+function frame(inner) {
+  const nav = [["General","#8a8a8a","⚙"],["Conexión","#4fbf67","⛓"],["Tareas","#4a9cf5","☰"],["Automatizaciones","#9b6bf2","⚡"],["Acerca de","#8a8a8a","ⓘ"]];
+  return `<div class="win"><aside class="side" aria-label="Secciones de la app"><div class="lights" aria-hidden="true"><i></i><i></i><i></i></div><div class="me"><div class="avatar">SJ</div><div><b>Salvador Juarez</b><div class="sm muted">Macch</div></div></div>${nav.map(([l,c,i]) => `<div class="navi ${l==="Automatizaciones"?"on":""}" ${l==="Automatizaciones"?'aria-current="page"':""}><span class="ico" style="background:${c}">${i}</span><span>${l}</span>${l==="Conexión"?'<span class="grow"></span><span class="dot ok" title="Conectada"></span>':""}</div>`).join("")}</aside><section class="content" aria-labelledby="ttl">${inner}<div class="sheet-bg"></div><div class="sheet" role="dialog" aria-modal="true" aria-label="Editor de rutina"></div></section></div>`;
+}
+function head(extra = "") { return `<div class="row wrap" style="margin-bottom:var(--s4)"><h1 id="ttl" class="grow">Automatizaciones</h1>${extra}</div>`; }
+function sheet(root, r, done) {
+  const bg = root.querySelector(".sheet-bg"), sh = root.querySelector(".sheet");
+  sh.innerHTML = `<div class="row" style="margin-bottom:var(--s3)"><span class="grow"></span><button class="btn ghost" data-close aria-label="Cerrar">✕</button></div>` + editorHTML(r);
+  bg.classList.add("open"); sh.classList.add("open"); setTimeout(() => sh.querySelector("input")?.focus({ preventScroll: true }), 320);
+  const close = () => { bg.classList.remove("open"); sh.classList.remove("open"); };
+  bg.onclick = close; sh.querySelector("[data-close]").onclick = close; sh.onkeydown = (e) => e.key === "Escape" && close();
+  wire(sh.querySelector("form"), r, () => { close(); done(); }, () => { close(); done(); });
+}
+const sw = (r) => `<input type="checkbox" class="switch" data-tg="${r.id}" ${r.enabled ? "checked" : ""} aria-label="Activar ${esc(r.name)}">`;
+function bindCommon(el, rerender) {
+  el.querySelectorAll("[data-tg]").forEach((s) => s.addEventListener("change", () => toggle(routines.find((r) => r.id === s.dataset.tg), s.checked, rerender)));
+  el.querySelectorAll("[data-run]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); runNow(b, routines.find((r) => r.id === b.dataset.run), rerender); }));
+}
+const lastLine = (r) => r.last ? `<span class="${r.last.ok ? "" : "tag bad"}">${r.last.ok ? "✓" : "falló"} ${r.last.at}</span>` : '<span class="muted">nunca corrió</span>';
+
+// ---------- 10 versions ----------
+const V = [];
+
+V.push({ name: "1 · Lista inline", bet: "Lista simple; la fila se expande y se edita en el lugar.", tradeoff: "Nada te saca de contexto; con muchas rutinas abiertas se alarga.", render(el) {
+  let open = null;
+  const draw = () => {
+    el.innerHTML = frame(head('<button class="btn primary" data-new>Nueva rutina</button>') + `<p class="sm muted" style="margin:-8px 0 16px">Corren en esta Mac con tu cuenta de Claude. Si a la hora la Mac estaba apagada, corren apenas vuelve.</p>
+      <div class="card list stagger" style="padding:0">${routines.length ? routines.map((r) => `<details ${open===r.id?"open":""} data-id="${r.id}"><summary class="item"><span class="dot ${status(r)}"></span><span class="grow"><b>${esc(r.name || "Nueva rutina")}</b><span class="sm muted" style="display:block">${when(r)} · ${where(r)} · próxima: ${nextRun(r)}</span></span><span class="sm">${lastLine(r)}</span>${sw(r)}</summary><div class="ed" style="padding:0 16px 16px">${r.last ? `<div class="result" style="margin-bottom:12px">${esc(r.last.text)}</div>` : ""}${editorHTML(r, { compact: true })}</div></details>`).join("") : '<div class="empty">Todavía no hay rutinas. Creá la primera con «Nueva rutina».</div>'}</div>`);
+    el.querySelectorAll("details").forEach((d) => { d.addEventListener("toggle", () => { if (d.open) { open = d.dataset.id; el.querySelectorAll("details").forEach((x) => x !== d && (x.open = false)); } });
+      const r = routines.find((x) => x.id === d.dataset.id) || pending; wire(d.querySelector("form"), r, () => { open = null; draw(); }, () => { open = null; draw(); }); });
+    el.querySelectorAll("summary .switch").forEach((s) => s.addEventListener("click", (e) => e.stopPropagation()));
+    el.querySelector("[data-new]").addEventListener("click", () => { pending = blank(); routines.unshift(pending); open = pending.id; draw(); el.querySelector("details[open] input")?.focus(); routines.shift(); });
+    bindCommon(el, draw);
+  };
+  let pending = null; draw();
+}});
+
+V.push({ name: "2 · Maestro‑detalle", bet: "Lista a la izquierda, editor siempre visible a la derecha.", tradeoff: "El más cómodo para ajustar; en ventanas angostas el editor baja.", render(el) {
+  let cur = routines[0] || blank();
+  const draw = () => {
+    el.innerHTML = frame(head() + `<div class="v2"><div class="lst stack" style="margin:0"><button data-new style="color:var(--accent);font-weight:600">＋ Nueva rutina</button>${routines.map((r) => `<button data-id="${r.id}" aria-current="${r===cur}"><span class="dot ${status(r)}"></span><span class="grow"><b>${esc(r.name)}</b><span class="sm muted" style="display:block">${when(r)}</span></span></button>`).join("")}</div>
+      <div class="card">${cur.last ? `<div class="row sm" style="margin-bottom:12px"><span class="grow muted">Último resultado · ${cur.last.at}</span>${sw(cur)}</div><div class="result" style="margin-bottom:16px">${esc(cur.last.text)}</div>` : ""}${editorHTML(cur)}</div></div>`);
+    el.querySelectorAll("[data-id]").forEach((b) => b.addEventListener("click", () => { cur = routines.find((r) => r.id === b.dataset.id); draw(); }));
+    el.querySelector("[data-new]").addEventListener("click", () => { cur = blank(); draw(); el.querySelector(".card input").focus(); });
+    wire(el.querySelector(".card form"), cur, draw, () => { cur = routines[0] || blank(); draw(); }); bindCommon(el, draw);
+  };
+  draw();
+}});
+
+V.push({ name: "3 · Tarjetas", bet: "Cada rutina es una tarjeta con su último resultado; el editor se abre al costado.", tradeoff: "Ves qué pasó sin entrar; usa más espacio por rutina.", render(el) {
+  const draw = () => {
+    el.innerHTML = frame(head('<button class="btn primary" data-new>Nueva rutina</button>') + `<div class="v3"><div class="grid stagger">${routines.map((r) => `<article class="card tile"><div class="row"><span class="dot ${status(r)}"></span><h3 class="grow">${esc(r.name)}</h3>${sw(r)}</div><div class="sm muted">${when(r)} · ${where(r)}</div>${r.last ? `<div class="result">${esc(r.last.text)}</div><div class="sm">${lastLine(r)}</div>` : '<div class="result muted">Todavía no corrió.</div>'}<div class="row"><button class="btn sm" data-run="${r.id}">Ejecutar</button><button class="btn sm ghost" data-edit="${r.id}">Editar</button></div></article>`).join("")}<button class="card new" data-new><span>＋ Nueva rutina</span></button></div></div>`);
+    el.querySelectorAll("[data-new]").forEach((b) => b.addEventListener("click", () => sheet(el, blank(), draw)));
+    el.querySelectorAll("[data-edit]").forEach((b) => b.addEventListener("click", () => sheet(el, routines.find((r) => r.id === b.dataset.edit), draw)));
+    bindCommon(el, draw);
+  };
+  draw();
+}});
+
+V.push({ name: "4 · Agenda", bet: "Grilla semanal: ves cuándo corre todo y tocás un hueco para crear.", tradeoff: "Clarísimo para horarios; las de intervalo o solo Slack van aparte.", render(el) {
+  const hours = [8,9,10,11,12,13,14,15,16,17,18,19];
+  const draw = () => {
+    let cells = `<div class="hd"></div>${ORDER.map((d) => `<div class="hd">${DAYNAME[d]}</div>`).join("")}`;
+    for (const h of hours) { cells += `<div class="h">${h}</div>`;
+      for (const d of ORDER) { const evs = routines.filter((r) => r.enabled && r.schedule.kind === "daily" && r.schedule.days.includes(d) && +r.schedule.time.split(":")[0] === h);
+        cells += `<div><button class="slot" data-h="${h}" data-d="${d}" aria-label="Nueva rutina ${DAYNAME[d]} ${h}:00"></button>${evs.map((r) => `<div class="ev ${status(r)==="bad"?"bad":""}"><b>${esc(r.name)}</b></div>`).join("")}</div>`; } }
+    const other = routines.filter((r) => !r.enabled || r.schedule.kind !== "daily");
+    el.innerHTML = frame(head('<span class="sm muted">Tocá un hueco para crear</span>') + `<div class="v4 stack"><div class="wk">${cells}</div><div class="card list" style="padding:0"><div class="item sm muted">Fuera de la grilla</div>${other.map((r) => `<div class="item"><span class="dot ${status(r)}"></span><span class="grow"><b>${esc(r.name)}</b> <span class="sm muted">· ${r.enabled ? when(r) : "pausada"}</span></span><button class="btn sm ghost" data-edit="${r.id}">Editar</button>${sw(r)}</div>`).join("") || '<div class="empty">Nada fuera de la grilla.</div>'}</div></div>`);
+    el.querySelectorAll(".slot").forEach((s) => s.addEventListener("click", () => { const r = blank(); r.schedule = { kind: "daily", time: String(s.dataset.h).padStart(2, "0") + ":00", days: [+s.dataset.d] }; sheet(el, r, draw); }));
+    el.querySelectorAll("[data-edit]").forEach((b) => b.addEventListener("click", () => sheet(el, routines.find((r) => r.id === b.dataset.edit), draw)));
+    bindCommon(el, draw);
+  };
+  draw();
+}});
+
+V.push({ name: "5 · Hoy", bet: "La línea de hoy: lo que ya corrió con su resultado y lo que viene.", tradeoff: "Responde «¿qué pasó hoy?» al instante; para configurar abre el editor.", render(el) {
+  const draw = () => {
+    const today = routines.filter((r) => r.enabled && r.schedule.kind === "daily" && r.schedule.days.includes(NOW.getDay())).sort((a, b) => a.schedule.time.localeCompare(b.schedule.time));
+    const nowStr = "11:20"; const past = today.filter((r) => r.schedule.time <= nowStr), next = today.filter((r) => r.schedule.time > nowStr);
+    const ev = (r, done) => `<div class="tlev"><span class="t">${r.schedule.time}</span><span class="dot ${done ? status(r) : "off"}"></span><div class="card"><div class="row"><b class="grow">${esc(r.name)}</b>${done ? lastLine(r) : '<span class="tag">pendiente</span>'}<button class="btn sm ghost" data-edit="${r.id}">Editar</button><button class="btn sm" data-run="${r.id}">${done ? "Repetir" : "Correr ya"}</button></div>${done && r.last ? `<div class="result" style="margin-top:10px">${esc(r.last.text)}</div>` : `<div class="sm muted" style="margin-top:4px">${where(r)}</div>`}</div></div>`;
+    el.innerHTML = frame(head('<button class="btn primary" data-new>Nueva rutina</button>') + `<div class="v5"><h2 style="margin-bottom:12px">Miércoles 4</h2><div class="tl stagger">${past.map((r) => ev(r, true)).join("")}<div class="nowline"><span>${nowStr}</span></div>${next.map((r) => ev(r, false)).join("") || '<div class="tlev sm muted">No queda nada más por hoy.</div>'}</div>
+      <details class="card" style="margin-top:20px"><summary style="cursor:pointer"><b>Todas las rutinas</b> <span class="sm muted">(${routines.length})</span></summary><div class="list" style="margin-top:8px">${routines.map((r) => `<div class="item" style="padding-left:0;padding-right:0"><span class="dot ${status(r)}"></span><span class="grow">${esc(r.name)} <span class="sm muted">· ${when(r)}</span></span><button class="btn sm ghost" data-edit="${r.id}">Editar</button>${sw(r)}</div>`).join("")}</div></details></div>`);
+    el.querySelector("[data-new]").addEventListener("click", () => sheet(el, blank(), draw));
+    el.querySelectorAll("[data-edit]").forEach((b) => b.addEventListener("click", () => sheet(el, routines.find((r) => r.id === b.dataset.edit), draw)));
+    bindCommon(el, draw);
+  };
+  draw();
+}});
+
+V.push({ name: "6 · Asistente", bet: "Crear en tres pasos (Qué → Cuándo → Dónde); la lista queda compacta abajo.", tradeoff: "Imposible olvidarse un campo; editar una existente es un paso extra.", render(el) {
+  let step = 0, d = blank();
+  const panes = [
+    () => `<label class="field">Nombre<input name="name" value="${esc(d.name)}" placeholder="Actualizar repos"><span class="err" data-e="name"></span></label><label class="field">Qué tiene que hacer Claude<textarea name="prompt" placeholder="Actualizá macch-core y macch-hub…">${esc(d.prompt)}</textarea><span class="err" data-e="prompt"></span></label>`,
+    () => `<div class="field">Hora<input type="time" name="time" value="${d.schedule.time}" style="max-width:160px"></div><div class="field">Días<div class="days">${ORDER.map((x) => `<button type="button" data-day="${x}" aria-pressed="${d.schedule.days.includes(x)}" aria-label="${DAYNAME[x]}">${DAYS[x]}</button>`).join("")}</div><span class="err" data-e="days"></span></div><p class="sm muted">Si a esa hora la Mac está apagada, corre apenas vuelve.</p>`,
+    () => `<label class="row card"><span class="grow">Mandarme el resultado por DM</span><input type="checkbox" class="switch" name="dm" ${d.dm?"checked":""}></label><label class="field">También en un canal (opcional)<input name="channel" value="${esc(d.channel)}" placeholder="C0C7YJPATEK"></label><div class="card sm"><b>${esc(d.name)}</b> · ${when(d)}<div class="muted">${esc(d.prompt).slice(0, 120)}</div></div>`,
+  ];
+  const draw = () => {
+    el.innerHTML = frame(head() + `<div class="v6 stack"><div class="card stack"><h2>Nueva rutina · ${["Qué","Cuándo","Dónde te aviso"][step]}</h2><div class="steps" aria-label="Paso ${step+1} de 3">${[0,1,2].map((i) => `<span class="${i<=step?"done":""}"></span>`).join("")}</div><form class="pane stack" novalidate>${panes[step]()}<div class="row">${step?'<button type="button" class="btn" data-back>Atrás</button>':""}<span class="grow"></span><button class="btn primary">${step===2?"Crear rutina":"Siguiente"}</button></div></form></div>
+      <div class="card list" style="padding:0"><div class="item"><b class="grow">Tus rutinas</b></div>${routines.map((r) => `<div class="item"><span class="dot ${status(r)}"></span><span class="grow">${esc(r.name)} <span class="sm muted">· ${when(r)} · ${lastLine(r)}</span></span><button class="btn sm" data-run="${r.id}">Ejecutar</button>${sw(r)}</div>`).join("")}</div></div>`);
+    const f = el.querySelector("form");
+    f.querySelectorAll("[data-day]").forEach((b) => b.addEventListener("click", () => { const x = +b.dataset.day, s = d.schedule.days; s.includes(x) ? s.splice(s.indexOf(x), 1) : s.push(x); b.setAttribute("aria-pressed", s.includes(x)); }));
+    el.querySelector("[data-back]")?.addEventListener("click", () => { step--; draw(); });
+    f.addEventListener("submit", (e) => { e.preventDefault(); const btn = f.querySelector(".primary"); const set = (k, m) => { const x = f.querySelector(`[data-e="${k}"]`); if (x) x.textContent = m; return !m; };
+      if (step === 0) { d.name = f.name.value.trim(); d.prompt = f.prompt.value.trim(); if (!set("name", d.name ? "" : "Ponele un nombre.") | !set("prompt", d.prompt ? "" : "Escribí qué tiene que hacer.")) return busy(btn, false); }
+      if (step === 1) { d.schedule.time = f.time.value; if (!set("days", d.schedule.days.length ? "" : "Elegí al menos un día.")) return busy(btn, false); }
+      if (step === 2) { d.dm = f.dm.checked; d.channel = f.channel.value.trim(); routines.push(d); return busy(btn, true, "Creada", () => { toast(`«${d.name}» corre ${when(d)}`); d = blank(); step = 0; draw(); }); }
+      step++; draw(); el.querySelector("form input, form button[data-day]")?.focus(); });
+    bindCommon(el, draw);
+  };
+  draw();
+}});
+
+V.push({ name: "7 · Plantillas", bet: "Arriba, rutinas listas para usar; un clic y la tenés. Abajo, las tuyas.", tradeoff: "Arrancar es trivial; el espacio de plantillas compite con tus rutinas.", render(el) {
+  const T = [
+    { e: "🔄", name: "Actualizar repos", prompt: "Actualizá ~/code/macch-core y ~/code/macch-hub (fetch; pull --ff-only si están limpios en la rama base). Una línea por repo.", time: "10:00", days: [0,1,2,3,4,5,6] },
+    { e: "🔀", name: "PRs abiertos", prompt: "Listá los PRs abiertos con CI y quién revisa.", time: "09:00", days: [1,2,3,4,5] },
+    { e: "🚨", name: "Errores de Sentry", prompt: "Resumí los errores nuevos de las últimas 24 h.", time: "18:30", days: [1,2,3,4,5] },
+    { e: "📋", name: "Resumen del día", prompt: "Resumime qué se mergeó hoy y qué quedó pendiente.", time: "19:00", days: [1,2,3,4,5] },
+    { e: "🧪", name: "Tests en master", prompt: "Corré los tests de macch-core en master y avisame si algo falla.", time: "08:00", days: [1,2,3,4,5] },
+  ];
+  const draw = () => {
+    el.innerHTML = frame(head('<button class="btn" data-new>Desde cero</button>') + `<div class="v7 stack"><h2>Empezá con una plantilla</h2><div class="tpls stagger">${T.map((t, i) => { const have = routines.some((r) => r.name === t.name); return `<button class="card tpl" data-t="${i}" ${have?'aria-disabled="true" style="opacity:.55"':""}><span class="emoji" aria-hidden="true">${t.e}</span><b>${t.name}</b><span class="sm muted">${t.time} · ${daysText(t.days)}</span><span class="sm" style="color:var(--accent)">${have ? "Ya la tenés" : "Usar plantilla →"}</span></button>`; }).join("")}</div>
+      <h2 style="margin-top:24px">Tus rutinas</h2><div class="card list" style="padding:0">${routines.map((r) => `<div class="item"><span class="dot ${status(r)}"></span><span class="grow"><b>${esc(r.name)}</b><span class="sm muted" style="display:block">${when(r)} · ${where(r)} · ${r.last ? (r.last.ok ? "✓ " : "falló ") + r.last.at : "nunca corrió"}</span></span><button class="btn sm ghost" data-edit="${r.id}">Editar</button><button class="btn sm" data-run="${r.id}">Ejecutar</button>${sw(r)}</div>`).join("") || '<div class="empty">Elegí una plantilla para empezar.</div>'}</div></div>`);
+    el.querySelectorAll("[data-t]").forEach((b) => b.addEventListener("click", () => { const t = T[+b.dataset.t]; if (b.getAttribute("aria-disabled")) { b.classList.add("shake"); setTimeout(() => b.classList.remove("shake"), 400); toast("Ya tenés esa rutina"); return; }
+      const r = blank(); Object.assign(r, { name: t.name, prompt: t.prompt, schedule: { kind: "daily", time: t.time, days: [...t.days] } }); sheet(el, r, draw); }));
+    el.querySelector("[data-new]").addEventListener("click", () => sheet(el, blank(), draw));
+    el.querySelectorAll("[data-edit]").forEach((b) => b.addEventListener("click", () => sheet(el, routines.find((r) => r.id === b.dataset.edit), draw)));
+    bindCommon(el, draw);
+  };
+  draw();
+}});
+
+V.push({ name: "8 · Tabla", bet: "Tabla con hora, días y destino editables en la celda; el prompt en un panel.", tradeoff: "Cambios rápidos en lote; menos espacio para leer resultados.", render(el) {
+  const draw = () => {
+    el.innerHTML = frame(head('<button class="btn primary" data-new>Nueva rutina</button>') + `<div class="v8 card tw" style="padding:0"><table><thead><tr><th>Activa</th><th>Nombre</th><th>Hora</th><th>Días</th><th>Aviso</th><th>Última</th><th class="num">Próxima</th><th></th></tr></thead><tbody>${routines.map((r) => `<tr data-id="${r.id}"><td>${sw(r)}</td><td><b>${esc(r.name)}</b></td><td>${r.schedule.kind==="daily" ? `<input class="cell" type="time" value="${r.schedule.time}" data-time aria-label="Hora de ${esc(r.name)}">` : `<span class="muted">${when(r)}</span>`}</td><td>${r.schedule.kind==="daily" ? `<div class="days">${ORDER.map((d) => `<button type="button" data-day="${d}" aria-pressed="${r.schedule.days.includes(d)}" aria-label="${DAYNAME[d]}">${DAYS[d]}</button>`).join("")}</div>` : "—"}</td><td><select class="cell" data-dest aria-label="Aviso de ${esc(r.name)}"><option value="dm" ${r.dm&&!r.channel?"selected":""}>DM</option><option value="ch" ${!r.dm&&r.channel?"selected":""}>Canal</option><option value="both" ${r.dm&&r.channel?"selected":""}>DM + canal</option></select></td><td>${lastLine(r)}</td><td class="num">${nextRun(r)}</td><td><button class="btn sm ghost" data-edit="${r.id}">Prompt</button><button class="btn sm" data-run="${r.id}">▶</button></td></tr>`).join("")}</tbody></table></div><p class="sm muted" style="margin-top:12px">Los cambios en la tabla se guardan solos.</p>`);
+    el.querySelectorAll("tr[data-id]").forEach((tr) => { const r = routines.find((x) => x.id === tr.dataset.id);
+      tr.querySelector("[data-time]")?.addEventListener("change", (e) => { r.schedule.time = e.target.value; toast(`${r.name}: ahora a las ${r.schedule.time}`); draw(); });
+      tr.querySelectorAll("[data-day]").forEach((b) => b.addEventListener("click", () => { const d = +b.dataset.day, s = r.schedule.days; if (s.includes(d) && s.length === 1) { b.classList.add("shake"); setTimeout(() => b.classList.remove("shake"), 400); toast("Tiene que correr al menos un día"); return; } s.includes(d) ? s.splice(s.indexOf(d), 1) : s.push(d); toast(`${r.name}: ${daysText(s)}`); draw(); }));
+      tr.querySelector("[data-dest]").addEventListener("change", (e) => { const v = e.target.value; r.dm = v !== "ch"; r.channel = v === "dm" ? "" : r.channel || "C0C7YJPATEK"; toast(`${r.name}: aviso por ${where(r)}`); }); });
+    el.querySelector("[data-new]").addEventListener("click", () => sheet(el, blank(), draw));
+    el.querySelectorAll("[data-edit]").forEach((b) => b.addEventListener("click", () => sheet(el, routines.find((r) => r.id === b.dataset.edit), draw)));
+    bindCommon(el, draw);
+  };
+  draw();
+}});
+
+V.push({ name: "9 · Lenguaje natural", bet: "Escribís la rutina como frase; ves en vivo cómo la entiende antes de crearla.", tradeoff: "Rapidísimo; para ajustes finos hay que abrir el editor.", render(el) {
+  const parse = (t) => { const m = t.match(/(?:a las?\s*)?(\d{1,2})(?::(\d{2}))?\s*(?:h|hs)?/i); const time = m ? `${m[1].padStart(2,"0")}:${m[2] || "00"}` : null;
+    const days = /lun(es)? a vie(rnes)?|h[aá]biles|de semana/i.test(t) ? [1,2,3,4,5] : /todos los d[ií]as|cada d[ií]a|diari/i.test(t) ? [0,1,2,3,4,5,6] : null;
+    const what = t.replace(/todos los d[ií]as|cada d[ií]a|lun(es)? a vie(rnes)?|d[ií]as h[aá]biles|a las?\s*\d{1,2}(:\d{2})?\s*(h|hs)?|,/gi, "").trim();
+    const channel = /#\w+/.exec(t)?.[0]; return { time, days, what, channel }; };
+  let text = "todos los días a las 10 actualizá los repos macch-core y macch-hub";
+  const draw = () => {
+    const p = parse(text); const ok = p.time && p.days && p.what.length > 3;
+    const name = /repo/i.test(p.what) ? "Actualizar repos" : /pr/i.test(p.what) ? "PRs abiertos" : p.what.split(" ").slice(0, 3).join(" ").replace(/^./, (c) => c.toUpperCase());
+    el.innerHTML = frame(head() + `<div class="v9 stack"><label class="sr" for="nl">Describí la rutina</label><input id="nl" class="nl" value="${esc(text)}" placeholder="todos los días a las 10 actualizá los repos" autocomplete="off">
+      <div class="chips" aria-live="polite"><span class="chip ${p.time?"hit":"miss"}">🕙 ${p.time || "falta la hora"}</span><span class="chip ${p.days?"hit":"miss"}">📅 ${p.days ? daysText(p.days) : "falta cuándo (ej. «todos los días»)"}</span><span class="chip ${p.what.length>3?"hit":"miss"}">✍️ ${p.what.length>3 ? esc(name) : "falta qué hacer"}</span><span class="chip hit">📨 DM${p.channel ? " + " + esc(p.channel) : ""}</span></div>
+      <div class="row"><button class="btn primary" data-create ${ok?"":'aria-disabled="true"'}>Crear «${esc(ok ? name : "…")}»</button><button class="btn ghost" data-adv>Ajustar en el editor</button></div>
+      <div class="card list" style="padding:0;margin-top:20px">${routines.map((r) => `<div class="item"><span class="dot ${status(r)}"></span><span class="grow"><b>${esc(r.name)}</b><span class="sm muted" style="display:block">${when(r)} · ${lastLine(r)}</span></span><button class="btn sm ghost" data-edit="${r.id}">Editar</button>${sw(r)}</div>`).join("")}</div></div>`);
+    const input = el.querySelector("#nl"); input.addEventListener("input", () => { text = input.value; const pos = input.selectionStart; draw(); const n = el.querySelector("#nl"); n.focus(); n.setSelectionRange(pos, pos); });
+    const build = () => { const r = blank(); Object.assign(r, { name, prompt: p.what.replace(/^./, (c) => c.toUpperCase()) + ".", schedule: { kind: "daily", time: p.time || "10:00", days: p.days || [1,2,3,4,5] } }); return r; };
+    el.querySelector("[data-create]").addEventListener("click", (e) => { if (!ok) { busy(e.currentTarget, false); toast("Completá lo que está en rojo"); return; } if (routines.some((r) => r.name === name)) { busy(e.currentTarget, false); toast("Ya existe una rutina con ese nombre"); return; } routines.push(build()); busy(e.currentTarget, true, "Creada", () => { text = ""; draw(); }); });
+    el.querySelector("[data-adv]").addEventListener("click", () => sheet(el, build(), draw));
+    el.querySelectorAll("[data-edit]").forEach((b) => b.addEventListener("click", () => sheet(el, routines.find((r) => r.id === b.dataset.edit), draw)));
+    bindCommon(el, draw);
+  };
+  draw();
+}});
+
+V.push({ name: "10 · Por estado", bet: "Tres columnas: Activas, Con error y Pausadas; lo que necesita atención salta a la vista.", tradeoff: "Ideal para mantener; no muestra horarios de un vistazo.", render(el) {
+  const draw = () => {
+    const cols = [["ok","Activas","dot ok"],["bad","Con error","dot bad"],["off","Pausadas","dot off"]];
+    el.innerHTML = frame(head('<button class="btn primary" data-new>Nueva rutina</button>') + `<div class="v10"><div class="cols">${cols.map(([k,l,d]) => { const rs = routines.filter((r) => status(r) === k); return `<section class="col" aria-labelledby="c-${k}"><h2 id="c-${k}"><span class="${d}"></span>${l} <span class="muted">${rs.length}</span></h2>${rs.map((r) => `<div class="k"><div class="row"><b class="grow">${esc(r.name)}</b>${sw(r)}</div><div class="sm muted" style="margin:4px 0 8px">${when(r)} · ${where(r)}</div>${k==="bad" ? `<div class="result" style="color:var(--danger);margin-bottom:8px">${esc(r.last.text)}</div><div class="row"><button class="btn sm primary" data-run="${r.id}">Reintentar</button><button class="btn sm ghost" data-edit="${r.id}">Editar</button></div>` : `<div class="row"><span class="sm grow">${k==="ok" ? "próxima " + nextRun(r) : "no corre"}</span><button class="btn sm ghost" data-edit="${r.id}">Editar</button></div>`}</div>`).join("") || `<div class="empty sm">${k==="bad" ? "Ningún error 🎉" : "Vacío"}</div>`}</section>`; }).join("")}</div></div>`);
+    el.querySelector("[data-new]").addEventListener("click", () => sheet(el, blank(), draw));
+    el.querySelectorAll("[data-edit]").forEach((b) => b.addEventListener("click", () => sheet(el, routines.find((r) => r.id === b.dataset.edit), draw)));
+    bindCommon(el, draw);
+  };
+  draw();
+}});
+
+// ---------- Switcher ----------
+const tabs = document.getElementById("tabs"), stage = document.getElementById("stage"), bet = document.getElementById("bet");
+tabs.innerHTML = V.map((v, i) => `<button role="tab" data-i="${i}">${v.name}</button>`).join("");
+let current = -1;
+function show(i) {
+  i = (i + V.length) % V.length; if (i === current) return;
+  const go = () => { current = i; routines = seed();
+    tabs.querySelectorAll("button").forEach((b, j) => b.setAttribute("aria-selected", j === i)); tabs.children[i].scrollIntoView({ block: "nearest", inline: "nearest" });
+    bet.innerHTML = `<span><b>Apuesta:</b> ${V[i].bet}</span><span><b>Costo:</b> ${V[i].tradeoff}</span><span class="kbd">1–0</span><span class="kbd">← →</span>`;
+    stage.innerHTML = "<div></div>"; V[i].render(stage.firstElementChild); history.replaceState(null, "", "#" + (i + 1)); };
+  if (document.startViewTransition && current !== -1 && !matchMedia("(prefers-reduced-motion: reduce)").matches) document.startViewTransition(go); else go();
+}
+tabs.addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) show(+b.dataset.i); });
+document.addEventListener("keydown", (e) => { if (e.target.matches("input, textarea, select")) return;
+  if (/^[0-9]$/.test(e.key)) show(e.key === "0" ? 9 : +e.key - 1); if (e.key === "ArrowRight") show(current + 1); if (e.key === "ArrowLeft") show(current - 1); });
+show(Math.max(0, Math.min(9, (parseInt(location.hash.slice(1)) || 1) - 1)));
+</script>
+</body>
+</html>

@@ -16,6 +16,8 @@
 
 It is ~600 lines of Python with two dependencies (`slack_bolt`, `slack_sdk`).
 
+Want each request to run on the requester's own Mac instead of one server? See [Machine AI](docs/machine-ai.md) (`worker/` + `desktop/`), which can also delegate tasks to claudino (`CLAUDINO_TRUSTED_AGENT_APPS`).
+
 ## How it works
 
 ```mermaid

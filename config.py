@@ -23,6 +23,9 @@ def _set(name: str) -> set:
 
 # Who may talk to claudino: Slack user IDs, comma separated. Empty means nobody.
 ALLOWED_USERS = _set("CLAUDINO_ALLOWED_USERS")
+# Other agents' Slack app IDs that may delegate to claudino by mentioning it explicitly (never by
+# thread follow-ups). They must ignore agent messages themselves, so claudino's answer can't start a loop.
+TRUSTED_AGENT_APPS = _set("CLAUDINO_TRUSTED_AGENT_APPS")
 
 # Claude Code runs.
 WORKDIR = _path("CLAUDINO_WORKDIR", "~")
