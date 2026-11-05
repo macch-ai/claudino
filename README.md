@@ -9,7 +9,7 @@
 - **One session per thread.** Every new message in the thread resumes the same Claude Code session, so context carries over.
 - **No mention needed once it's in.** After claudino takes part in a thread, teammates' replies reach it unless they mention someone else.
 - **Never duplicates work.** Messages sent while a run is working are queued and handled together by the next run.
-- **Files and forwards.** Images, files and forwarded messages in the thread are downloaded and handed to the session.
+- **Files and forwards.** Images, files and forwarded messages in the thread are downloaded and handed to the session. A forwarded message that belongs to a thread brings that whole thread along, and its new replies on every later turn (claudino must be in its channel).
 - **Instant feedback.** Every request gets an emoji reaction picked by Claude Haiku, with `:eyes:` as fallback, and the thread shows a loading status with rotating lines Haiku writes for that request until the answer lands. This needs **Agents** > **Agent experience** turned on in the Slack app settings (the manifest does it).
 - **Sentry alerts (optional).** New top-level Sentry alerts in a channel fire a [Claude Code routine](https://docs.claude.com/en/docs/claude-code) that investigates and replies in the alert thread.
 - **Allowlist.** Only the Slack users you list can start runs.
@@ -90,7 +90,7 @@ Set all three to turn it on: `CLAUDINO_ALERT_CHANNEL` (where Sentry posts), `CLA
 > [!WARNING]
 > By default claudino runs Claude Code with `--dangerously-skip-permissions`: **any command can run on the server without approval.**
 
-- `CLAUDINO_ALLOWED_USERS` limits **who can start a run**, not **what the thread contains**. Everything in the thread goes into the prompt: other people's messages, forwarded messages, files, and Sentry alert text written by whoever triggered the error. Treat this as a prompt injection path to a shell.
+- `CLAUDINO_ALLOWED_USERS` limits **who can start a run**, not **what the thread contains**. Everything in the thread goes into the prompt: other people's messages, forwarded messages and their threads, files, and Sentry alert text written by whoever triggered the error. Treat this as a prompt injection path to a shell.
 - Run claudino as a dedicated, unprivileged user on a machine you can afford to rebuild. Give that user only the credentials the agent truly needs.
 - Want approvals instead? Set `CLAUDINO_PERMISSION_MODE=auto` (or `acceptEdits`, `default`). Blocked actions are reported back in the thread.
 - Slack tokens are never passed to sessions: `claude_cli._env()` strips every `SLACK_*` variable.

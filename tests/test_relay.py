@@ -193,6 +193,46 @@ class ThreadPromptTest(RelayTest):
         self.assertNotIn("hi!", prompt)
 
 
+class ForwardFollowUpTest(RelayTest):
+    """Follow-up turns in claudino's thread keep up with the forwarded message's thread."""
+    FORWARD = {"ts": "10.0", "user": ALICE, "text": f"<@{RELAY_USER_ID}> why?", "attachments": [
+        {"author_name": "Carol", "text": "deploy broke", "channel_id": "CSRC", "ts": "5.5",
+         "from_url": "https://x.slack.com/archives/CSRC/p5500000?thread_ts=5.0&cid=CSRC"}]}
+    SOURCE = [{"ts": "5.0", "user": BOB, "text": "starting deploy"},
+              {"ts": "5.5", "user": "UCAROL", "text": "deploy broke"}]
+    THREAD = [FORWARD, {"ts": "11.0", "user": RELAY_USER_ID, "bot_id": "B1", "text": "a bad migration"},
+              {"ts": "12.0", "user": ALICE, "text": "fixed now?"}]
+
+    def prompt(self, source, seen_ts):
+        def replies(channel, ts, limit):
+            return {"messages": source if channel == "CSRC" else self.THREAD}
+        self.client.conversations_replies.side_effect = replies
+        with mock.patch.object(self.r.claude_cli, "get", return_value={"seen_ts": seen_ts} if seen_ts else {}):
+            return self.r.thread_prompt("C1", "10.0", [("12.0", ALICE)], "C1:10.0")[0]
+
+    def test_first_turn_has_the_forwarded_thread(self):
+        prompt = self.prompt(self.SOURCE, None)
+        self.assertIn("starting deploy", prompt)
+        self.assertIn("(the forwarded message): deploy broke", prompt)
+
+    def test_follow_up_gets_new_replies_in_the_forwarded_thread(self):
+        source = self.SOURCE + [{"ts": "11.5", "user": BOB, "text": "rolled back"}]
+        prompt = self.prompt(source, "11.0")
+        self.assertIn("fixed now?", prompt)
+        self.assertIn("[new messages in the thread of the forwarded message 5.5 in <#CSRC>]", prompt)
+        self.assertIn("rolled back", prompt)
+        self.assertNotIn("starting deploy", prompt)  # the session already saw it
+
+    def test_follow_up_without_new_forwarded_replies_adds_nothing(self):
+        prompt = self.prompt(self.SOURCE, "11.0")
+        self.assertNotIn("forwarded message", prompt)
+
+    def test_new_session_after_a_failure_gets_the_whole_forwarded_thread_again(self):
+        prompt = self.prompt(self.SOURCE, "0")
+        self.assertIn("Thread so far", prompt)
+        self.assertIn("starting deploy", prompt)
+
+
 class RenderTest(RelayTest):
     def test_forwarded_message_text_is_included(self):
         out = self.r.render({"ts": "1.0", "text": "look at this", "attachments": [{"author_name": "Carol", "text": "hi team"}]})
@@ -204,6 +244,48 @@ class RenderTest(RelayTest):
             out = self.r.render({"ts": "1.0", "text": "", "files": [{"id": "F1"}]})
         self.assertIn("[attached file x.png]", out)
         note.assert_called_once()
+
+    def forward(self, **extra):
+        return {"ts": "9.0", "text": "", "attachments": [
+            {"author_name": "Carol", "text": "deploy broke", "channel_id": "CSRC", "ts": "5.5", **extra}]}
+
+    def test_forwarded_reply_brings_its_thread(self):
+        self.client.conversations_replies.return_value = {"messages": [
+            {"ts": "5.0", "user": BOB, "text": "starting deploy"},
+            {"ts": "5.5", "user": "UCAROL", "text": "deploy broke"},
+            {"ts": "6.0", "user": BOB, "text": "rolling back"}]}
+        url = "https://x.slack.com/archives/CSRC/p5500000?thread_ts=5.0&cid=CSRC"
+        out = self.r.render(self.forward(from_url=url))
+        self.client.conversations_replies.assert_called_once_with(channel="CSRC", ts="5.0", limit=200)
+        self.assertIn("[thread of the forwarded message in <#CSRC>, 3 messages]", out)
+        self.assertIn("starting deploy", out)
+        self.assertIn("[5.5] <@UCAROL> (the forwarded message): deploy broke", out)
+        self.assertIn("rolling back", out)
+
+    def test_forwarded_thread_parent_brings_its_replies(self):
+        self.client.conversations_replies.return_value = {"messages": [
+            {"ts": "5.5", "user": "UCAROL", "text": "deploy broke"}, {"ts": "6.0", "user": BOB, "text": "on it"}]}
+        out = self.r.render(self.forward())
+        self.client.conversations_replies.assert_called_once_with(channel="CSRC", ts="5.5", limit=200)
+        self.assertIn("on it", out)
+
+    def test_forwarded_lone_message_adds_nothing(self):
+        self.client.conversations_replies.return_value = {"messages": [{"ts": "5.5", "user": "UCAROL", "text": "deploy broke"}]}
+        self.assertNotIn("thread of the forwarded message", self.r.render(self.forward()))
+
+    def test_unreadable_source_thread_is_reported(self):
+        self.client.conversations_replies.side_effect = SlackApiError("no", {"error": "not_in_channel"})
+        out = self.r.render(self.forward(thread_ts="5.0"))
+        self.assertIn("could not read it (not_in_channel)", out)
+        self.assertIn("[forwarded/shared message from Carol]: deploy broke", out)
+
+    def test_forwards_inside_the_source_thread_are_not_followed(self):
+        nested = {"ts": "6.0", "user": BOB, "text": "fyi",
+                  "attachments": [{"text": "older", "channel_id": "COTHER", "ts": "1.0"}]}
+        self.client.conversations_replies.return_value = {"messages": [{"ts": "5.5", "user": "UCAROL", "text": "x"}, nested]}
+        out = self.r.render(self.forward())
+        self.assertEqual(self.client.conversations_replies.call_count, 1)
+        self.assertIn("[forwarded/shared message from ]: older", out)
 
 
 class EmojiTest(RelayTest):

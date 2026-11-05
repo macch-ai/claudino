@@ -20,6 +20,7 @@ import os
 import re
 import threading
 import time
+import urllib.parse
 import urllib.request
 
 from slack_bolt import App
@@ -284,8 +285,64 @@ def file_note(f: dict, ts: str) -> str:
     return f"[attached file {name} ({f.get('mimetype', '?')}) saved at {dest}; open it with the Read tool]"
 
 
-def render(m: dict) -> str:
-    """A message's text plus its files and forwarded/shared messages."""
+def source_thread_ts(a: dict) -> str | None:
+    """The thread a forwarded message belongs to, from the attachment or its permalink."""
+    if a.get("thread_ts"):
+        return a["thread_ts"]
+    for url in (a.get("from_url"), a.get("original_url")):
+        found = urllib.parse.parse_qs(urllib.parse.urlparse(url or "").query).get("thread_ts")
+        if found:
+            return found[0]
+    return None
+
+
+def forwarded_thread(a: dict, since: str | None = None) -> str:
+    """The thread around a forwarded message, so the session sees its context.
+    With since, only its messages newer than that ts (follow-up turns already saw the rest)."""
+    channel, ts = a.get("channel_id"), a.get("ts")
+    if not channel or not ts:
+        return ""
+    thread_ts = source_thread_ts(a) or ts
+    try:
+        messages = app.client.conversations_replies(channel=channel, ts=thread_ts, limit=200)["messages"]
+    except SlackApiError as error:
+        return (f"[thread of the forwarded message in <#{channel}>: could not read it "
+                f"({error.response.get('error')}); claudino must be a member of that channel]")
+    if len(messages) < 2:
+        return ""  # a lone message: its text above is all the context there is
+    if since is not None:
+        messages = [m for m in messages if float(m["ts"]) > float(since)]
+        if not messages:
+            return ""
+    lines = []
+    for m in messages:
+        mark = " (the forwarded message)" if m.get("ts") == ts else ""
+        author = "claudino" if is_from_claudino(m) else f"<@{m.get('user') or m.get('bot_id')}>"
+        lines.append(f"  [{m['ts']}] {author}{mark}: {render(m, follow_forwards=False)}")
+    title = (f"new messages in the thread of the forwarded message {ts} in <#{channel}>" if since is not None
+             else f"thread of the forwarded message in <#{channel}>, {len(messages)} messages")
+    return f"[{title}]:\n" + "\n".join(lines)
+
+
+def forwarded_updates(messages: list, seen_ts: str) -> list:
+    """New replies in the threads of messages forwarded earlier in this thread."""
+    updates, done = [], set()
+    for m in messages:
+        if float(m["ts"]) > float(seen_ts):
+            continue  # rendered in full with the new messages
+        for a in m.get("attachments") or []:
+            source = (a.get("channel_id"), source_thread_ts(a) or a.get("ts"))
+            if source in done:
+                continue
+            done.add(source)
+            update = forwarded_thread(a, since=seen_ts)
+            if update:
+                updates.append(update)
+    return updates
+
+
+def render(m: dict, follow_forwards: bool = True) -> str:
+    """A message's text plus its files and forwarded/shared messages (with their threads)."""
     parts = [m.get("text") or ""]
     for f in m.get("files") or []:
         parts.append(file_note(f, m["ts"]))
@@ -296,6 +353,8 @@ def render(m: dict) -> str:
             parts.append(f"[forwarded/shared message from {who}]: {body}")
         for f in a.get("files") or []:
             parts.append(file_note(f, m["ts"]))
+        if follow_forwards:
+            parts.append(forwarded_thread(a))
     return "\n".join(p for p in parts if p)
 
 
@@ -309,6 +368,8 @@ def thread_prompt(channel: str, thread_ts: str, requests: list, key: str) -> tup
     for m in new:
         author = "claudino (you)" if is_from_claudino(m) else f"<@{m.get('user') or m.get('bot_id')}>"
         lines.append(f"[{m['ts']}] {author}: {render(m)}")
+    if not fresh:
+        lines += forwarded_updates(messages, seen_ts)
     requesters = " ".join(sorted({f"<@{user}>" for _, user in requests}))
     header = (f"Slack channel {channel}, thread {thread_ts}. Requesters: {requesters}. "
               f"Requests: the messages with ts {', '.join(ts for ts, _ in requests)}.\n"
