@@ -30,14 +30,14 @@ class FireTest(unittest.TestCase):
         request, text = self.sent()
         self.assertEqual(url, "https://claude.ai/code/x")
         self.assertIn("alert_ts=1.2", text)
-        self.assertTrue(text.endswith("followup_ts=3.4"))
+        self.assertTrue(text.endswith("followup_ts=3.4\n\ncaveman mode"))
         self.assertEqual(request.get_header("Authorization"), "Bearer tok")
         self.assertEqual(request.get_full_url(), fire_claude.FIRE_URL)
 
-    def test_fire_text_sends_the_text_as_is(self):
+    def test_fire_text_sends_the_text_with_caveman_mode(self):
         fire_claude.fire_text("mention_ts=9.9")
         _, text = self.sent()
-        self.assertEqual(text, "mention_ts=9.9")
+        self.assertEqual(text, "mention_ts=9.9\n\ncaveman mode")
 
 
 if __name__ == "__main__":

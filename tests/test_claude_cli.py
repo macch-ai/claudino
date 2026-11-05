@@ -33,6 +33,13 @@ class ClaudeCliTest(unittest.TestCase):
             claude_cli.run("k", "prompt")
         claude.assert_called_once_with("prompt", "S1")
 
+    def test_prompt_asks_for_caveman_mode(self):
+        proc = mock.Mock(stdout='{"result": "ok"}', returncode=0)
+        with mock.patch.object(claude_cli.subprocess, "run", return_value=proc) as run:
+            claude_cli._claude("prompt", None)
+        cmd = run.call_args.args[0]
+        self.assertEqual(cmd[cmd.index("-p") + 1], "prompt\n\ncaveman mode")
+
     def test_failed_resume_resets_the_thread(self):
         claude_cli.update("k", session_id="S1", seen_ts="9.0")
         with mock.patch.object(claude_cli, "_claude", side_effect=RuntimeError("gone")):

@@ -10,6 +10,7 @@ WORKDIR = Path.home() / "code"
 STATE_FILE = Path.home() / ".local/state/claude-relay/sessions.json"
 INSTRUCTIONS_FILE = Path(__file__).with_name("claudino_instructions.md")
 TIMEOUT_SECONDS = 50 * 60
+CAVEMAN = "\n\ncaveman mode"  # every relayed request asks Claude Code for caveman mode
 EXTRA_PATH = [str(Path.home() / ".local/bin"), str(Path.home() / ".nvm/versions/node/v24.13.0/bin")]
 
 _lock = threading.Lock()
@@ -39,7 +40,7 @@ def _env() -> dict:
 
 
 def _claude(prompt: str, session_id: str | None) -> dict:
-    cmd = ["claude", "-p", prompt, "--output-format", "json", "--permission-mode", "auto",
+    cmd = ["claude", "-p", prompt + CAVEMAN, "--output-format", "json", "--permission-mode", "auto",
            "--append-system-prompt", INSTRUCTIONS_FILE.read_text()]
     if session_id:
         cmd += ["--resume", session_id]
