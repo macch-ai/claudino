@@ -233,8 +233,9 @@ def clean_request(text: str) -> str:
 def haiku(prompt: str) -> str:
     """One quick, tool-less Claude Haiku answer."""
     cmd, cwd = claude_cli.command(
-        ["claude", "-p", prompt, "--model", "haiku", "--tools", "", "--output-format", "json"], "/tmp")
-    proc = subprocess.run(cmd, cwd=cwd, env=claude_cli._env(), capture_output=True, text=True, timeout=20)
+        ["claude", "-p", "--model", "haiku", "--tools", "", "--output-format", "json"], "/tmp")
+    proc = subprocess.run(cmd, cwd=cwd, env=claude_cli._env(), input=prompt, capture_output=True, text=True,
+                          timeout=20)
     return json.loads(proc.stdout).get("result", "").strip()
 
 
