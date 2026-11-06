@@ -35,6 +35,7 @@ flowchart LR
 | [`config.py`](config.py) | Every setting, read from the environment |
 | [`claudino_instructions.md`](claudino_instructions.md) | System prompt appended to every session |
 | [`fire_claude.py`](fire_claude.py) | Fires the alert routine through its API trigger |
+| [`scripts/alert-slack.py`](scripts/alert-slack.py) | Lets the alert routine react and reply in the alert channel without reading the bot token |
 | [`deploy/`](deploy) | systemd units and the optional CI deployer |
 | [`scripts/`](scripts) | `test.sh`, `set-tokens.sh`, `deploy.sh`, `slack-probe.py` |
 
@@ -89,6 +90,8 @@ All settings live in `~/.config/claude-relay/env`. [`.env.example`](.env.example
 ### Sentry alerts (optional)
 
 Set all three to turn it on: `CLAUDINO_ALERT_CHANNEL` (where Sentry posts), `CLAUDINO_ALERT_BOT_USER` (the Sentry app's user ID) and `CLAUDINO_ALERT_ROUTINE_URL` (your routine's `/fire` endpoint). Put the routine's API token in `~/.config/claude-alert-fire/token`. On start, claudino catches up on alerts from the last 24 hours it missed.
+
+With `CLAUDINO_RUN_AS`, the routine's session cannot read the bot token. It reacts and replies through `sudo -n -H -u claudino ~claudino/claude-relay/.venv/bin/python ~claudino/claude-relay/scripts/alert-slack.py add|get|post ...`, which acts only in `CLAUDINO_ALERT_CHANNEL` (sudo rule from `deploy/setup-relay-user.sh`).
 
 ## Security
 

@@ -105,6 +105,8 @@ cat > "$rules" <<EOF
 # deploy/setup-relay-user.sh: the relay starts Claude as $agent and restarts itself when it deploys.
 $relay ALL=($agent) NOPASSWD: ALL
 $relay ALL=(root) NOPASSWD: /usr/bin/systemctl restart claudino.service
+# The alert routine reacts and replies in the alert channel without reading the bot token.
+$agent ALL=($relay) NOPASSWD: $relay_home/claude-relay/.venv/bin/python $relay_home/claude-relay/scripts/alert-slack.py *
 EOF
 visudo -cqf "$rules"
 install -m 440 "$rules" /etc/sudoers.d/claudino
@@ -141,6 +143,8 @@ find "$moved" -type f -exec chmod 600 {} +
 cat <<EOF
 Done: $relay runs the relay and the deployer; Claude runs as $agent.
 Logs:    journalctl -u claudino.service -f
+Alerts:  sessions react and reply in the alert channel with
+         sudo -n -H -u $relay $relay_home/claude-relay/.venv/bin/python $relay_home/claude-relay/scripts/alert-slack.py
 Tokens:  Claude sessions could read the old ones, so rotate them in the Slack app settings, then:
          cd $relay_home/claude-relay && sudo -H -u $relay scripts/set-tokens.sh
 EOF
