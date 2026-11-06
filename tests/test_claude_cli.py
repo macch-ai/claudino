@@ -1,4 +1,5 @@
 import os
+import signal
 import tempfile
 import threading
 import time
@@ -81,14 +82,33 @@ class ClaudeCliTest(unittest.TestCase):
             config.WORKDIR, config.TIMEOUT_SECONDS, config.EXTRA_PATH = self.tmp, 30, []
             config.LOCAL_INSTRUCTIONS_FILE = Path(self.tmp) / "none.md"
             script = Path(self.tmp) / "claude"
-            script.write_text("#!/bin/sh\nsleep 30 &\nwait\n")
+            # The tool runs in its own session, like Claude's Bash tool does, so a group kill misses it.
+            marker = Path(self.tmp) / "tool.pid"
+            script.write_text(f"#!/bin/sh\npython3 -c 'import os; os.setsid(); open(\"{marker}\", \"w\")"
+                              f".write(str(os.getpid())); os.execvp(\"sleep\", [\"sleep\", \"30\"])' &\nwait\n")
             script.chmod(0o755)
             with mock.patch.dict(os.environ, {"PATH": f"{self.tmp}:/usr/bin:/bin"}):
-                threading.Timer(0.3, claude_cli.stop, args=("k",)).start()
+                def stop_once_the_tool_runs():
+                    for _ in range(200):
+                        if marker.exists() and marker.read_text():
+                            break
+                        time.sleep(0.05)
+                    claude_cli.stop("k")
+                threading.Thread(target=stop_once_the_tool_runs).start()
                 started = time.time()
                 with self.assertRaises(claude_cli.Stopped):
                     claude_cli._claude("prompt", None, "k")
         self.assertLess(time.time() - started, 10)
+        tool = int(marker.read_text())
+        for _ in range(100):
+            try:
+                os.kill(tool, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            os.kill(tool, signal.SIGKILL)
+            self.fail("the tool outlived the stop")
         self.assertNotIn("k", claude_cli._running)
         self.assertNotIn("k", claude_cli._stopped)
 

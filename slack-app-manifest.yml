@@ -27,7 +27,8 @@ oauth_config:
 settings:
   event_subscriptions:
     bot_events:
-      # Shows the stop button on claudino's working status in threads.
+      # Stops a run when someone clicks stop. Slack only shows the button on agents.sessions.setStatus
+      # statuses, which claudino does not use because they hide the rotating loading lines.
       - agent_session_stopped
       - message.channels
       - reaction_added
