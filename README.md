@@ -9,6 +9,7 @@
 - **One session per thread.** Every new message in the thread resumes the same Claude Code session, so context carries over.
 - **No mention needed once it's in.** After claudino takes part in a thread, teammates' replies reach it unless they mention someone else.
 - **Never duplicates work.** Messages sent while a run is working are queued and handled together by the next run.
+- **Survives restarts.** Runs a restart cuts off (every deploy restarts claudino) resume in the same Claude session, with their queued requests.
 - **Files and forwards.** Images, files and forwarded messages in the thread are downloaded and handed to the session. A forwarded message that belongs to a thread brings that whole thread along, and its new replies on every later turn (claudino must be in its channel).
 - **Instant feedback.** Every request gets an emoji reaction picked by Claude Haiku, with `:eyes:` as fallback, and the thread shows a loading status with rotating lines Haiku writes for that request until the answer lands. This needs **Agents** > **Agent experience** turned on in the Slack app settings (the manifest does it).
 - **Sentry alerts (optional).** New top-level Sentry alerts in a channel fire a [Claude Code routine](https://docs.claude.com/en/docs/claude-code) that investigates and replies in the alert thread.
@@ -78,6 +79,8 @@ All settings live in `~/.config/claude-relay/env`. [`.env.example`](.env.example
 | `CLAUDINO_STATUS` | `is working on it...` | Loading status shown in the thread while a run works; `off` hides it |
 | `CLAUDINO_LOADING_MESSAGES` | empty | Fallback loading lines, separated by `\|` (max 10), shown until Haiku's lines for the request are ready or when it fails |
 | `CLAUDINO_TIMEOUT_SECONDS` | `3000` | Kill a run after this long |
+| `CLAUDINO_MAX_RUNS` | `3` | Claude runs working at once; other threads wait for a free slot |
+| `CLAUDINO_FILES_KEEP_DAYS` | `14` | Delete files downloaded from Slack after this many days; `0` keeps them |
 | `CLAUDINO_ALERT_*`, `CLAUDINO_CLAUDE_APP_USER` | empty: off | Sentry alert hand-over, see below |
 
 **Private instructions.** Anything in `~/.config/claude-relay/instructions.md` is appended to the system prompt. Put your team's specifics there (repositories, CLIs, people, PR labels) so they stay out of this repo.

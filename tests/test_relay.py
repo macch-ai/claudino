@@ -1,5 +1,10 @@
+import json
+import os
+import tempfile
+import threading
 import time
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from slack_sdk.errors import SlackApiError
@@ -14,6 +19,13 @@ ALERTS, SENTRY = "CALERTS", "USENTRY"
 class RelayTest(unittest.TestCase):
     def setUp(self):
         self.r = load_relay()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name)
+        for name, path in (("RUNS_FILE", self.tmp / "runs.json"), ("FILES_DIR", self.tmp / "files")):
+            patcher = mock.patch.object(self.r, name, path)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         self.r.busy.clear()
         self.r.active_threads.clear()
         self.client = self.r.app.client
@@ -453,3 +465,103 @@ class StopTest(RelayTest):
             self.r.on_session_stopped({"channel": "C1", "thread_ts": "9.0", "user": ALICE})
         self.stop.assert_not_called()
         self.assertEqual(self.client.assistant_threads_setStatus.call_args.kwargs["status"], "")
+
+
+class ThreadMessagesTest(RelayTest):
+    def test_follows_every_page_and_skips_the_repeated_parent(self):
+        parent = {"ts": "1.0", "text": "parent"}
+        self.client.conversations_replies.side_effect = [
+            {"messages": [parent, {"ts": "2.0"}], "response_metadata": {"next_cursor": "c2"}},
+            {"messages": [parent, {"ts": "3.0"}], "response_metadata": {"next_cursor": ""}},
+        ]
+        self.assertEqual([m["ts"] for m in self.r.thread_messages("C1", "1.0")], ["1.0", "2.0", "3.0"])
+        self.assertEqual(self.client.conversations_replies.call_args.kwargs["cursor"], "c2")
+
+
+class RunsFileTest(RelayTest):
+    def setUp(self):
+        super().setUp()
+        self.start = mock.patch.object(self.r, "start").start()
+        mock.patch.object(self.r, "ack").start()
+        mock.patch.object(self.r, "update_loading").start()
+        self.addCleanup(mock.patch.stopall)
+
+    def saved(self):
+        return json.loads(self.r.RUNS_FILE.read_text())
+
+    def test_busy_threads_are_mirrored_to_disk(self):
+        self.r.dispatch({"channel": "C1", "ts": "1.0", "user": ALICE})
+        self.r.dispatch({"channel": "C1", "ts": "2.0", "thread_ts": "1.0", "user": BOB})
+        self.assertEqual(self.saved()["1.0"]["requests"], [["1.0", ALICE]])
+        self.assertEqual(self.saved()["1.0"]["pending"], [["2.0", BOB]])
+        self.r.busy["1.0"]["seen_until"] = 5.0
+        self.r.reply_done("1.0")
+        self.assertEqual(self.saved(), {})
+
+    def test_restart_resumes_runs_and_their_queues(self):
+        self.r.RUNS_FILE.write_text(json.dumps({
+            "1.0": {"since": time.time(), "channel": "C1", "requests": [["1.0", ALICE]], "pending": [["2.0", BOB]]},
+            "5.0": {"since": time.time(), "channel": "C1", "requests": [["5.0", ALICE]], "pending": [],
+                    "answered": True},
+            "9.0": {"since": time.time() - self.r.BUSY_TIMEOUT_SECONDS - 1, "channel": "C1",
+                    "requests": [["9.0", ALICE]], "pending": []},
+        }))
+        self.r.resume_runs()
+        self.start.assert_called_once_with("C1", "1.0", [("1.0", ALICE), ("2.0", BOB)])
+        self.assertTrue(self.r.busy["1.0"]["resumed"])
+        self.assertEqual(list(self.saved()), ["1.0"])
+
+    def test_resumed_run_is_told_it_was_cut_off(self):
+        self.client.conversations_replies.return_value = {"messages": [{"ts": "1.0", "user": ALICE, "text": "hi"}]}
+        with mock.patch.object(self.r.claude_cli, "get", return_value={}):
+            prompt, _ = self.r.thread_prompt("C1", "1.0", [("1.0", ALICE)], "C1:1.0", resumed=True)
+        self.assertIn(self.r.RESUMED_NOTE, prompt)
+
+
+class RunSlotsTest(RelayTest):
+    def test_runs_past_the_cap_wait_for_a_free_slot(self):
+        slots = mock.patch.object(self.r, "run_slots", threading.BoundedSemaphore(1)).start()
+        self.addCleanup(mock.patch.stopall)
+        mock.patch.object(self.r, "show_working", return_value=lambda: None).start()
+        mock.patch.object(self.r, "post").start()
+        release, running, seen = threading.Event(), [], []
+
+        def session(*args):
+            running.append(1)
+            seen.append(len(running))
+            release.wait(5)
+            running.pop()
+            return "ok"
+        mock.patch.object(self.r, "run_session", side_effect=session).start()
+        threads = [threading.Thread(target=self.r.work, args=("C1", ts, [(ts, ALICE)])) for ts in ("1.0", "2.0")]
+        for t in threads:
+            t.start()
+        time.sleep(0.2)
+        self.assertEqual(seen, [1])
+        release.set()
+        for t in threads:
+            t.join(5)
+        self.assertEqual(seen, [1, 1])
+        self.assertTrue(slots.acquire(blocking=False))
+
+
+class PruneFilesTest(RelayTest):
+    def test_old_files_are_deleted_and_new_ones_kept(self):
+        self.r.FILES_DIR.mkdir()
+        old, new = self.r.FILES_DIR / "old.png", self.r.FILES_DIR / "new.png"
+        old.write_text("x")
+        new.write_text("x")
+        long_ago = time.time() - 15 * 86400
+        os.utime(old, (long_ago, long_ago))
+        with mock.patch.object(self.r.config, "FILES_KEEP_DAYS", 14):
+            self.r.prune_files()
+        self.assertEqual(sorted(p.name for p in self.r.FILES_DIR.iterdir()), ["new.png"])
+
+    def test_zero_keeps_everything(self):
+        self.r.FILES_DIR.mkdir()
+        old = self.r.FILES_DIR / "old.png"
+        old.write_text("x")
+        os.utime(old, (0, 0))
+        with mock.patch.object(self.r.config, "FILES_KEEP_DAYS", 0):
+            self.r.prune_files()
+        self.assertTrue(old.exists())
