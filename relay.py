@@ -8,7 +8,8 @@
   together by one next run once claudino replies, so work is never duplicated.
 - Each request gets an emoji reaction as soon as it is seen, and the thread shows a
   loading status with rotating lines Haiku writes for the request until the answer is posted.
-- Slack's stop button on the working status kills the thread's run and drops its queue.
+- A stop from Slack (agent_session_stopped) kills the thread's run and drops its queue. Slack only
+  shows the button on agents.sessions statuses, which hide the loading lines, so claudino does not use them.
 
 On start it catches up on Sentry alerts posted since the last one it saw.
 Settings live in config.py.
