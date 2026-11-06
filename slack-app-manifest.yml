@@ -27,6 +27,8 @@ oauth_config:
 settings:
   event_subscriptions:
     bot_events:
+      # Shows the stop button on claudino's working status in threads.
+      - agent_session_stopped
       - message.channels
       - reaction_added
   socket_mode_enabled: true

@@ -350,7 +350,8 @@ class StatusTest(RelayTest):
             self.wait_for(lambda: self.calls)
             return "done!", False
         self.work(run)
-        self.assertEqual(self.calls, [("status", "is working on it...", ["Warming up"]), ("post", "done!")])
+        self.assertEqual(self.calls, [("status", "is working on it...", ["Warming up"]), ("post", "done!"),
+                                      ("status", "", None)])
         kwargs = self.client.assistant_threads_setStatus.call_args.kwargs
         self.assertEqual((kwargs["channel_id"], kwargs["thread_ts"]), ("C1", "1.0"))
         self.assertNotIn("1.0", self.r.status_wake)
@@ -370,7 +371,7 @@ class StatusTest(RelayTest):
         with mock.patch.object(self.r, "pick_loading_messages", return_value=["Late"]):
             self.r.update_loading("1.0", "hi")
             self.wait_for(lambda: "1.0" in self.r.loading_messages)
-        self.assertEqual([c[0] for c in self.calls].count("status"), 1)
+        self.assertEqual([c[1] for c in self.calls if c[0] == "status"], ["is working on it...", ""])
 
     def test_status_off_never_calls_slack(self):
         with mock.patch.object(self.r.config, "STATUS", ""), \
@@ -383,9 +384,19 @@ class StatusTest(RelayTest):
 
     def test_failed_post_clears_the_status(self):
         self.client.chat_postMessage.side_effect = SlackApiError("bad", {"error": "channel_not_found"})
-        with mock.patch.object(self.r, "reply_done"):
-            self.r.post("C1", "1.0", "hi")
+        with mock.patch.object(self.r, "reply_done") as reply_done:
+            self.work()
+        reply_done.assert_called_once_with("1.0")
         self.assertEqual(self.client.assistant_threads_setStatus.call_args.kwargs["status"], "")
+
+    def test_stopped_run_says_who_stopped_it_and_clears_the_status(self):
+        self.r.busy["1.0"] = {"since": time.time(), "channel": "C1", "pending": [], "stopped_by": BOB}
+        self.addCleanup(self.r.busy.clear)
+
+        def run(key, prompt):
+            raise self.r.claude_cli.Stopped()
+        self.work(run)
+        self.assertEqual(self.calls[1:], [("post", f"Stopped by <@{BOB}>."), ("status", "", None)])
 
     def test_unsupported_channel_stops_refreshing(self):
         self.client.assistant_threads_setStatus.side_effect = SlackApiError(
@@ -416,3 +427,29 @@ class LoadingMessagesTest(RelayTest):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StopTest(RelayTest):
+    def setUp(self):
+        super().setUp()
+        self.stop = mock.patch.object(self.r.claude_cli, "stop").start()
+        self.addCleanup(mock.patch.stopall)
+        self.addCleanup(self.r.busy.clear)
+        self.r.busy["1.0"] = {"since": time.time(), "channel": "C1", "pending": [("2.0", BOB)]}
+
+    def test_stop_kills_the_run_and_drops_its_queue(self):
+        self.r.on_session_stopped({"channel": "C1", "thread_ts": "1.0", "user": ALICE})
+        self.stop.assert_called_once_with("C1:1.0")
+        self.assertEqual(self.r.busy["1.0"]["pending"], [])
+        self.assertEqual(self.r.busy["1.0"]["stopped_by"], ALICE)
+
+    def test_outsiders_cannot_stop(self):
+        self.r.on_session_stopped({"channel": "C1", "thread_ts": "1.0", "user": "UOUTSIDER"})
+        self.stop.assert_not_called()
+        self.assertEqual(self.r.busy["1.0"]["pending"], [("2.0", BOB)])
+
+    def test_stop_without_a_run_clears_the_status(self):
+        with mock.patch.object(self.r.config, "STATUS", "is working on it..."):
+            self.r.on_session_stopped({"channel": "C1", "thread_ts": "9.0", "user": ALICE})
+        self.stop.assert_not_called()
+        self.assertEqual(self.client.assistant_threads_setStatus.call_args.kwargs["status"], "")

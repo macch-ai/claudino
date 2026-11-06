@@ -8,6 +8,7 @@
   together by one next run once claudino replies, so work is never duplicated.
 - Each request gets an emoji reaction as soon as it is seen, and the thread shows a
   loading status with rotating lines Haiku writes for the request until the answer is posted.
+- Slack's stop button on the working status kills the thread's run and drops its queue.
 
 On start it catches up on Sentry alerts posted since the last one it saw.
 Settings live in config.py.
@@ -256,6 +257,7 @@ SEEN_WINDOW_SECONDS = 30  # fallback when a run never recorded what it saw
 
 def start(channel: str, thread_ts: str, requests: list) -> None:
     active_threads.add((channel, thread_ts))
+    claude_cli.clear_stop(f"{channel}:{thread_ts}")
     threading.Thread(target=work, args=(channel, thread_ts, requests), daemon=True).start()
 
 
@@ -424,8 +426,6 @@ def post(channel: str, thread_ts: str, text: str) -> None:
         app.client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=text[:39000], unfurl_links=False)
     except SlackApiError as error:
         log.error("post in %s failed: %s", thread_ts, error.response.get("error"))
-        if config.STATUS:
-            set_status(channel, thread_ts, "")
         reply_done(thread_ts)
 
 
@@ -435,6 +435,8 @@ def work(channel: str, thread_ts: str, requests: list) -> None:
     def reply(text: str) -> None:
         stop_status()
         post(channel, thread_ts, text)
+        if config.STATUS:
+            set_status(channel, thread_ts, "")  # agent sessions stay "working" after a reply until told otherwise
 
     key = f"{channel}:{thread_ts}"
     requesters = " ".join(sorted({f"<@{user}>" for _, user in requests}))
@@ -455,6 +457,11 @@ def work(channel: str, thread_ts: str, requests: list) -> None:
                     raise
                 log.warning("session %s failed, retrying with a new one: %s", key, error)
         reply(answer or f"{requesters} the Claude session ended without an answer.")
+    except claude_cli.Stopped:
+        with lock:
+            who = (busy.get(thread_ts) or {}).get("stopped_by")
+        log.info("session %s stopped by %s", key, who)
+        reply(f"Stopped by <@{who}>." if who else "Stopped.")
     except Exception as error:
         log.error("session %s failed: %s", key, error)
         reply(f"{requesters} the Claude session failed: `{str(error)[:300]}`")
@@ -494,6 +501,27 @@ def on_message(event: dict) -> None:
         log.info("skip %s from %s: not allowed", event.get("ts"), event.get("user"))
         return
     dispatch(event)
+
+
+@app.event("agent_session_stopped")
+def on_session_stopped(event: dict) -> None:
+    """Someone clicked stop on the thread's working status: kill the run and drop its queue.
+    Slack leaves the status as it is; the run's "Stopped" reply clears it."""
+    channel, thread_ts, user = event.get("channel"), event.get("thread_ts"), event.get("user")
+    if user not in config.ALLOWED_USERS:
+        log.info("ignore stop in %s from %s: not allowed", thread_ts, user)
+        return
+    with lock:
+        state = busy.get(thread_ts)
+        running = bool(state) and state["channel"] == channel
+        if running:
+            state["pending"] = []
+            state["stopped_by"] = user
+    if running:
+        log.info("stop in %s from %s", thread_ts, user)
+        claude_cli.stop(f"{channel}:{thread_ts}")
+    elif config.STATUS:
+        set_status(channel, thread_ts, "")  # nothing is running: just clear a leftover status
 
 
 @app.event("reaction_added")

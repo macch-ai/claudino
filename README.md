@@ -12,6 +12,7 @@
 - **Files and forwards.** Images, files and forwarded messages in the thread are downloaded and handed to the session. A forwarded message that belongs to a thread brings that whole thread along, and its new replies on every later turn (claudino must be in its channel).
 - **Instant feedback.** Every request gets an emoji reaction picked by Claude Haiku, with `:eyes:` as fallback, and the thread shows a loading status with rotating lines Haiku writes for that request until the answer lands. This needs **Agents** > **Agent experience** turned on in the Slack app settings (the manifest does it).
 - **Sentry alerts (optional).** New top-level Sentry alerts in a channel fire a [Claude Code routine](https://docs.claude.com/en/docs/claude-code) that investigates and replies in the alert thread.
+- **Stop button.** Allowed users can click stop on the working status to kill the run and drop queued requests. It needs the `agent_session_stopped` event subscription (the manifest has it).
 - **Allowlist.** Only the Slack users you list can start runs.
 
 It is ~600 lines of Python with two dependencies (`slack_bolt`, `slack_sdk`).
