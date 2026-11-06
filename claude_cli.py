@@ -2,6 +2,7 @@
 
 import json
 import os
+import signal
 import subprocess
 import threading
 from pathlib import Path
@@ -12,6 +13,13 @@ SESSIONS_FILE = config.STATE_DIR / "sessions.json"
 INSTRUCTIONS_FILE = Path(__file__).with_name("claudino_instructions.md")
 
 _lock = threading.Lock()
+_runs_lock = threading.Lock()
+_running = {}  # key -> the thread's running claude process
+_stopped = set()  # keys whose run a user stopped
+
+
+class Stopped(Exception):
+    """A user stopped the thread's run."""
 
 
 def _load() -> dict:
@@ -52,24 +60,66 @@ def instructions() -> str:
     return text
 
 
-def _claude(prompt: str, session_id: str | None) -> dict:
+def _kill(proc: subprocess.Popen) -> None:
+    """Kill claude and every tool it started (it leads its own process group)."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+def stop(key: str) -> None:
+    """Stop the thread's run: kill it now, or make it stop before it starts."""
+    with _runs_lock:
+        _stopped.add(key)
+        proc = _running.get(key)
+    if proc:
+        _kill(proc)
+
+
+def clear_stop(key: str) -> None:
+    """A new run starts for the thread: an earlier stop no longer applies."""
+    with _runs_lock:
+        _stopped.discard(key)
+
+
+def _claude(prompt: str, session_id: str | None, key: str = "") -> dict:
     cmd = ["claude", "-p", config.with_suffix(prompt), "--output-format", "json", *permission_args(),
            "--append-system-prompt", instructions()]
     if session_id:
         cmd += ["--resume", session_id]
-    proc = subprocess.run(cmd, cwd=config.WORKDIR, env=_env(), capture_output=True, text=True,
-                          timeout=config.TIMEOUT_SECONDS)
+    with _runs_lock:
+        if key in _stopped:
+            _stopped.discard(key)
+            raise Stopped()
+        proc = subprocess.Popen(cmd, cwd=config.WORKDIR, env=_env(), stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, start_new_session=True)
+        _running[key] = proc
     try:
-        return json.loads(proc.stdout)
+        stdout, stderr = proc.communicate(timeout=config.TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        _kill(proc)
+        proc.communicate()
+        raise
+    finally:
+        with _runs_lock:
+            _running.pop(key, None)
+            stopped = key in _stopped
+            _stopped.discard(key)
+    if stopped:
+        raise Stopped()
+    try:
+        return json.loads(stdout)
     except json.JSONDecodeError:
-        raise RuntimeError(f"claude exited {proc.returncode}: {(proc.stderr or proc.stdout)[-500:]}")
+        raise RuntimeError(f"claude exited {proc.returncode}: {(stderr or stdout)[-500:]}")
 
 
 def run(key: str, prompt: str) -> tuple[str, bool]:
-    """Send prompt to the thread's session, resuming it when there is one. Returns (answer, is_error)."""
+    """Send prompt to the thread's session, resuming it when there is one. Returns (answer, is_error).
+    Raises Stopped when a user stops the run; the thread keeps its session."""
     session_id = get(key).get("session_id")
     try:
-        data = _claude(prompt, session_id)
+        data = _claude(prompt, session_id, key)
     except RuntimeError:
         if not session_id:
             raise
