@@ -15,9 +15,10 @@ class ClaudeCliTest(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.tmp = tmp.name
-        patcher = mock.patch.object(claude_cli, "SESSIONS_FILE", Path(tmp.name) / "sessions.json")
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for name, path in (("SESSIONS_FILE", "sessions.json"), ("SYSTEM_PROMPT_FILE", "system-prompt.md")):
+            patcher = mock.patch.object(claude_cli, name, Path(tmp.name) / path)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def test_thread_state_roundtrip(self):
         claude_cli.update("C1:1.0", session_id="S1")
@@ -46,7 +47,14 @@ class ClaudeCliTest(unittest.TestCase):
         with mock.patch.multiple(claude_cli.config, **settings), \
                 mock.patch.object(claude_cli.subprocess, "Popen", return_value=proc) as popen:
             claude_cli._claude("prompt", None)
+        self.stdin = proc.communicate.call_args.args[0]
         return popen.call_args.args[0]
+
+    def test_prompts_stay_off_the_command_line(self):
+        cmd = self.claude_cmd(PROMPT_SUFFIX="")
+        self.assertEqual(self.stdin, "prompt")
+        self.assertNotIn("prompt", cmd)
+        self.assertFalse(any(arg.startswith("You are claudino") for arg in cmd))
 
     def test_new_sessions_get_their_id_up_front(self):
         proc = mock.Mock(returncode=0)
@@ -62,7 +70,7 @@ class ClaudeCliTest(unittest.TestCase):
         cmd = self.claude_cmd(PERMISSION_MODE="bypassPermissions", PROMPT_SUFFIX="")
         self.assertIn("--dangerously-skip-permissions", cmd)
         self.assertNotIn("--permission-mode", cmd)
-        self.assertEqual(cmd[cmd.index("-p") + 1], "prompt")
+        self.assertEqual(self.stdin, "prompt")
 
     def test_other_permission_modes_are_passed_through(self):
         cmd = self.claude_cmd(PERMISSION_MODE="auto")
@@ -70,14 +78,16 @@ class ClaudeCliTest(unittest.TestCase):
         self.assertNotIn("--dangerously-skip-permissions", cmd)
 
     def test_prompt_suffix_is_appended(self):
-        cmd = self.claude_cmd(PROMPT_SUFFIX="caveman mode")
-        self.assertEqual(cmd[cmd.index("-p") + 1], "prompt\n\ncaveman mode")
+        self.claude_cmd(PROMPT_SUFFIX="caveman mode")
+        self.assertEqual(self.stdin, "prompt\n\ncaveman mode")
 
     def test_local_instructions_are_appended(self):
         local = Path(self.tmp) / "instructions.md"
         local.write_text("Private note.")
         cmd = self.claude_cmd(LOCAL_INSTRUCTIONS_FILE=local)
-        prompt = cmd[cmd.index("--append-system-prompt") + 1]
+        path = Path(cmd[cmd.index("--append-system-prompt-file") + 1])
+        prompt = path.read_text()
+        self.assertEqual(path.stat().st_mode & 0o777, 0o640)
         self.assertTrue(prompt.startswith("You are claudino"))
         self.assertTrue(prompt.endswith("Private note."))
 

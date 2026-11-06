@@ -12,6 +12,9 @@ import config
 
 SESSIONS_FILE = config.STATE_DIR / "sessions.json"
 INSTRUCTIONS_FILE = Path(__file__).with_name("claudino_instructions.md")
+# The system prompt goes to Claude in a file and the prompt on stdin: under CLAUDINO_RUN_AS, sudo logs
+# every command line to the journal and auth.log, and Slack threads do not belong there.
+SYSTEM_PROMPT_FILE = config.STATE_DIR / "system-prompt.md"
 
 _lock = threading.Lock()
 _runs_lock = threading.Lock()
@@ -71,6 +74,18 @@ def instructions() -> str:
     return text
 
 
+def instructions_file() -> str:
+    """instructions() in a file the user that runs Claude can read (the state dir is group-readable)."""
+    text = instructions()
+    if not SYSTEM_PROMPT_FILE.exists() or SYSTEM_PROMPT_FILE.read_text() != text:
+        SYSTEM_PROMPT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = SYSTEM_PROMPT_FILE.with_suffix(".tmp")
+        tmp.write_text(text)
+        tmp.chmod(0o640)
+        tmp.replace(SYSTEM_PROMPT_FILE)
+    return str(SYSTEM_PROMPT_FILE)
+
+
 def _tree(pid: int) -> list:
     """pid and every process below it. Claude's Bash tool starts its own process groups, so a
     group kill misses them; the parent links still lead to them."""
@@ -120,8 +135,8 @@ def clear_stop(key: str) -> None:
 
 
 def _claude(prompt: str, session_id: str | None, key: str = "", new: bool = False) -> dict:
-    cmd = ["claude", "-p", config.with_suffix(prompt), "--output-format", "json", *permission_args(),
-           "--append-system-prompt", instructions()]
+    cmd = ["claude", "-p", "--output-format", "json", *permission_args(),
+           "--append-system-prompt-file", instructions_file()]
     if session_id:
         cmd += ["--session-id" if new else "--resume", session_id]
     with _runs_lock:
@@ -129,11 +144,11 @@ def _claude(prompt: str, session_id: str | None, key: str = "", new: bool = Fals
             _stopped.discard(key)
             raise Stopped()
         cmd, cwd = command(cmd, config.WORKDIR)
-        proc = subprocess.Popen(cmd, cwd=cwd, env=_env(), stdout=subprocess.PIPE,
+        proc = subprocess.Popen(cmd, cwd=cwd, env=_env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, start_new_session=True)
         _running[key] = proc
     try:
-        stdout, stderr = proc.communicate(timeout=config.TIMEOUT_SECONDS)
+        stdout, stderr = proc.communicate(config.with_suffix(prompt), timeout=config.TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired:
         _kill(proc)
         proc.communicate()
