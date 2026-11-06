@@ -91,6 +91,15 @@ class OnMessageTest(RelayTest):
             self.r.on_message({"channel": ALERTS, "user": SENTRY, "ts": "5.0"})
         hand_over.assert_called_once_with("5.0")
 
+    def test_unreadable_alert_channel_does_not_stop_startup(self):
+        last_alert = self.tmp / "last-alert"
+        last_alert.write_text(str(time.time()))
+        self.client.conversations_history.side_effect = SlackApiError("no", {"error": "not_in_channel"})
+        with mock.patch.object(self.r, "LAST_ALERT_FILE", last_alert), \
+                mock.patch.object(self.r, "hand_over") as hand_over:
+            self.r.catch_up()
+        hand_over.assert_not_called()
+
     def test_sentry_thread_reply_is_not_an_alert(self):
         self.assertFalse(self.r.is_sentry_alert({"user": SENTRY, "ts": "6.0", "thread_ts": "5.0"}))
 
