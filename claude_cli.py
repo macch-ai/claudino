@@ -60,12 +60,30 @@ def instructions() -> str:
     return text
 
 
+def _tree(pid: int) -> list:
+    """pid and every process below it. Claude's Bash tool starts its own process groups, so a
+    group kill misses them; the parent links still lead to them."""
+    out = subprocess.run(["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True).stdout
+    children = {}
+    for line in out.splitlines():
+        fields = line.split()
+        if len(fields) == 2 and all(f.isdigit() for f in fields):
+            children.setdefault(int(fields[1]), []).append(int(fields[0]))
+    found, todo = [], [pid]
+    while todo:
+        current = todo.pop()
+        found.append(current)
+        todo += children.get(current, [])
+    return found
+
+
 def _kill(proc: subprocess.Popen) -> None:
-    """Kill claude and every tool it started (it leads its own process group)."""
-    try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
+    """Kill claude and every tool it started, found before any of them dies and gets reparented."""
+    for pid in _tree(proc.pid):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
 
 
 def stop(key: str) -> None:
