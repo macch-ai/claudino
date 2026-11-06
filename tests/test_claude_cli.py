@@ -26,16 +26,19 @@ class ClaudeCliTest(unittest.TestCase):
         self.assertEqual(claude_cli.get("C1:2.0"), {})
 
     def test_first_run_starts_a_session_and_saves_it(self):
-        with mock.patch.object(claude_cli, "_claude", return_value={"result": "hola", "session_id": "S2"}) as claude:
+        def claude(prompt, session_id, key, new):
+            self.assertTrue(new)
+            self.assertEqual(claude_cli.get("k")["session_id"], session_id)  # saved before the run starts
+            return {"result": "hola", "session_id": session_id}
+        with mock.patch.object(claude_cli, "_claude", side_effect=claude):
             self.assertEqual(claude_cli.run("k", "prompt"), ("hola", False))
-        claude.assert_called_once_with("prompt", None, "k")
-        self.assertEqual(claude_cli.get("k")["session_id"], "S2")
+        self.assertEqual(len(claude_cli.get("k")["session_id"]), 36)
 
     def test_later_runs_resume_the_thread_session(self):
         claude_cli.update("k", session_id="S1")
         with mock.patch.object(claude_cli, "_claude", return_value={"result": "ok", "session_id": "S1"}) as claude:
             claude_cli.run("k", "prompt")
-        claude.assert_called_once_with("prompt", "S1", "k")
+        claude.assert_called_once_with("prompt", "S1", "k", False)
 
     def claude_cmd(self, **settings):
         proc = mock.Mock(returncode=0)
@@ -44,6 +47,16 @@ class ClaudeCliTest(unittest.TestCase):
                 mock.patch.object(claude_cli.subprocess, "Popen", return_value=proc) as popen:
             claude_cli._claude("prompt", None)
         return popen.call_args.args[0]
+
+    def test_new_sessions_get_their_id_up_front(self):
+        proc = mock.Mock(returncode=0)
+        proc.communicate.return_value = ('{"result": "ok"}', "")
+        with mock.patch.object(claude_cli.subprocess, "Popen", return_value=proc) as popen:
+            claude_cli._claude("prompt", "ID1", "k", True)
+            claude_cli._claude("prompt", "ID1", "k", False)
+        first, second = (c.args[0] for c in popen.call_args_list)
+        self.assertEqual(first[first.index("--session-id") + 1], "ID1")
+        self.assertEqual(second[second.index("--resume") + 1], "ID1")
 
     def test_permission_checks_are_skipped_by_default(self):
         cmd = self.claude_cmd(PERMISSION_MODE="bypassPermissions", PROMPT_SUFFIX="")

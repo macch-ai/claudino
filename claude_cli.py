@@ -5,6 +5,7 @@ import os
 import signal
 import subprocess
 import threading
+import uuid
 from pathlib import Path
 
 import config
@@ -101,11 +102,11 @@ def clear_stop(key: str) -> None:
         _stopped.discard(key)
 
 
-def _claude(prompt: str, session_id: str | None, key: str = "") -> dict:
+def _claude(prompt: str, session_id: str | None, key: str = "", new: bool = False) -> dict:
     cmd = ["claude", "-p", config.with_suffix(prompt), "--output-format", "json", *permission_args(),
            "--append-system-prompt", instructions()]
     if session_id:
-        cmd += ["--resume", session_id]
+        cmd += ["--session-id" if new else "--resume", session_id]
     with _runs_lock:
         if key in _stopped:
             _stopped.discard(key)
@@ -134,13 +135,16 @@ def _claude(prompt: str, session_id: str | None, key: str = "") -> dict:
 
 def run(key: str, prompt: str) -> tuple[str, bool]:
     """Send prompt to the thread's session, resuming it when there is one. Returns (answer, is_error).
-    Raises Stopped when a user stops the run; the thread keeps its session."""
+    Raises Stopped when a user stops the run; the thread keeps its session.
+    A new session's ID is saved before it starts, so a run a restart cuts off can be resumed."""
     session_id = get(key).get("session_id")
+    new = not session_id
+    if new:
+        session_id = str(uuid.uuid4())
+        update(key, session_id=session_id)
     try:
-        data = _claude(prompt, session_id, key)
+        data = _claude(prompt, session_id, key, new)
     except RuntimeError:
-        if not session_id:
-            raise
         update(key, session_id=None, seen_ts="0")
         raise
     if data.get("session_id"):

@@ -11,6 +11,8 @@
 - A stop from Slack (agent_session_stopped) kills the thread's run and drops its queue. Slack only
   shows the button on agents.sessions statuses, which hide the loading lines, so claudino does not use them.
 
+Runs survive restarts: busy threads are mirrored to disk and resumed when claudino starts again.
+At most CLAUDINO_MAX_RUNS Claude runs work at once; downloaded files are pruned after a while.
 On start it catches up on Sentry alerts posted since the last one it saw.
 Settings live in config.py.
 """
@@ -38,6 +40,7 @@ BUSY_TIMEOUT_SECONDS = 60 * 60  # a run that never replied stops blocking its th
 STATUS_REFRESH_SECONDS = 90  # Slack clears a thread status after 2 minutes without a reply
 LAST_ALERT_FILE = config.STATE_DIR / "last_alert_ts"
 FILES_DIR = config.STATE_DIR / "files"
+RUNS_FILE = config.STATE_DIR / "runs.json"  # busy threads, so a restart can resume them
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("claude-relay")
@@ -47,8 +50,83 @@ _me = app.client.auth_test()
 RELAY_USER_ID, RELAY_BOT_ID = _me["user_id"], _me.get("bot_id")
 
 lock = threading.Lock()
-busy = {}  # thread_ts -> {"since": float, "channel": str, "pending": [(ts, user)]}
+busy = {}  # thread_ts -> {"since": float, "channel": str, "requests": [(ts, user)], "pending": [(ts, user)]}
+run_slots = threading.BoundedSemaphore(config.MAX_RUNS)
 active_threads = set()  # (channel, thread_ts) where claudino took part
+
+
+def thread_messages(channel: str, thread_ts: str) -> list:
+    """Every message in a thread, following Slack's pages (each holds at most 200)."""
+    messages, seen, cursor = [], set(), None
+    while True:
+        extra = {"cursor": cursor} if cursor else {}
+        page = app.client.conversations_replies(channel=channel, ts=thread_ts, limit=200, **extra)
+        for m in page["messages"]:
+            if m.get("ts") not in seen or m.get("ts") is None:  # later pages repeat the parent
+                seen.add(m.get("ts"))
+                messages.append(m)
+        cursor = (page.get("response_metadata") or {}).get("next_cursor")
+        if not cursor:
+            return messages
+
+
+def save_runs() -> None:
+    """Mirror busy to disk. Call with lock held."""
+    data = {thread_ts: {key: state.get(key) for key in ("since", "channel", "requests", "pending", "answered")}
+            for thread_ts, state in busy.items()}
+    RUNS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = RUNS_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data))
+    tmp.replace(RUNS_FILE)
+
+
+def resume_runs() -> None:
+    """Start again the runs a restart cut off (every deploy restarts claudino), with their queues."""
+    try:
+        saved = json.loads(RUNS_FILE.read_text())
+    except FileNotFoundError:
+        return
+    except ValueError as error:
+        log.warning("unreadable %s: %s", RUNS_FILE, error)
+        saved = {}
+    for thread_ts, state in saved.items():
+        requests = [] if state.get("answered") else [tuple(r) for r in state.get("requests") or []]
+        requests += [tuple(r) for r in state.get("pending") or []]
+        if not requests:
+            continue
+        if time.time() - state["since"] > BUSY_TIMEOUT_SECONDS:
+            log.info("not resuming %s: its run started too long ago", thread_ts)
+            continue
+        with lock:
+            busy[thread_ts] = {"since": time.time(), "channel": state["channel"], "requests": requests,
+                               "pending": [], "resumed": True}
+        log.info("resuming %s after a restart (%d requests)", thread_ts, len(requests))
+        start(state["channel"], thread_ts, requests)
+    with lock:
+        save_runs()
+
+
+def prune_files() -> None:
+    """Delete downloaded Slack files older than CLAUDINO_FILES_KEEP_DAYS (0 keeps them)."""
+    if config.FILES_KEEP_DAYS <= 0 or not FILES_DIR.exists():
+        return
+    cutoff = time.time() - config.FILES_KEEP_DAYS * 86400
+    removed = 0
+    for path in FILES_DIR.iterdir():
+        if path.is_file() and path.stat().st_mtime < cutoff:
+            path.unlink(missing_ok=True)
+            removed += 1
+    if removed:
+        log.info("pruned %d downloaded files older than %d days", removed, config.FILES_KEEP_DAYS)
+
+
+def prune_files_daily() -> None:
+    while True:
+        try:
+            prune_files()
+        except OSError as error:
+            log.warning("pruning files failed: %s", error)
+        time.sleep(24 * 60 * 60)
 
 
 def is_sentry_alert(message: dict) -> bool:
@@ -91,7 +169,7 @@ def claudino_in_thread(channel: str, thread_ts: str) -> bool:
     if (channel, thread_ts) in active_threads:
         return True
     try:
-        messages = app.client.conversations_replies(channel=channel, ts=thread_ts, limit=200)["messages"]
+        messages = thread_messages(channel, thread_ts)
     except SlackApiError as error:
         log.warning("read thread %s failed: %s", thread_ts, error.response.get("error"))
         return False
@@ -244,10 +322,12 @@ def dispatch(message: dict) -> None:
         state = busy.get(thread_ts)
         if state and time.time() - state["since"] < BUSY_TIMEOUT_SECONDS:
             state["pending"].append((ts, user))
+            save_runs()
             log.info("queued %s: a run for thread %s is still working", ts, thread_ts)
             update_loading(thread_ts, message.get("text") or "")
             return
-        busy[thread_ts] = {"since": time.time(), "channel": channel, "pending": []}
+        busy[thread_ts] = {"since": time.time(), "channel": channel, "requests": [(ts, user)], "pending": []}
+        save_runs()
         loading_messages.pop(thread_ts, None)  # the last run's lines are about an older request
     update_loading(thread_ts, message.get("text") or "")
     start(channel, thread_ts, [(ts, user)])
@@ -307,7 +387,7 @@ def forwarded_thread(a: dict, since: str | None = None) -> str:
         return ""
     thread_ts = source_thread_ts(a) or ts
     try:
-        messages = app.client.conversations_replies(channel=channel, ts=thread_ts, limit=200)["messages"]
+        messages = thread_messages(channel, thread_ts)
     except SlackApiError as error:
         return (f"[thread of the forwarded message in <#{channel}>: could not read it "
                 f"({error.response.get('error')}); claudino must be a member of that channel]")
@@ -361,10 +441,14 @@ def render(m: dict, follow_forwards: bool = True) -> str:
     return "\n".join(p for p in parts if p)
 
 
-def thread_prompt(channel: str, thread_ts: str, requests: list, key: str) -> tuple[str, str]:
+RESUMED_NOTE = ("claudino restarted while you were working on these requests, which cut your last run off. "
+                "Check what you already did in this session, then finish the work.\n")
+
+
+def thread_prompt(channel: str, thread_ts: str, requests: list, key: str, resumed: bool = False) -> tuple[str, str]:
     """The thread messages the session has not seen yet, plus who is asking for what."""
     seen_ts = claude_cli.get(key).get("seen_ts") or "0"
-    messages = app.client.conversations_replies(channel=channel, ts=thread_ts, limit=200)["messages"]
+    messages = thread_messages(channel, thread_ts)
     fresh = seen_ts == "0"
     new = [m for m in messages if float(m["ts"]) > float(seen_ts) and (fresh or not is_from_claudino(m))]
     lines = []
@@ -376,6 +460,7 @@ def thread_prompt(channel: str, thread_ts: str, requests: list, key: str) -> tup
     requesters = " ".join(sorted({f"<@{user}>" for _, user in requests}))
     header = (f"Slack channel {channel}, thread {thread_ts}. Requesters: {requesters}. "
               f"Requests: the messages with ts {', '.join(ts for ts, _ in requests)}.\n"
+              + (RESUMED_NOTE if resumed else "")
               + ("Thread so far:\n" if fresh else "New messages in the thread since your last answer:\n"))
     last_seen = max([m["ts"] for m in messages] + [seen_ts], key=float)
     return header + "\n".join(lines), last_seen
@@ -430,33 +515,51 @@ def post(channel: str, thread_ts: str, text: str) -> None:
         reply_done(thread_ts)
 
 
+def run_session(channel: str, thread_ts: str, requests: list, key: str, resumed: bool) -> str:
+    """Hand the thread's new messages to its Claude session; retry once with a new session."""
+    for attempt in range(2):
+        prompt, last_seen = thread_prompt(channel, thread_ts, requests, key, resumed)
+        with lock:
+            if thread_ts in busy:
+                busy[thread_ts]["seen_until"] = float(last_seen)
+        try:
+            started = time.time()
+            answer, is_error = claude_cli.run(key, prompt)
+            claude_cli.update(key, seen_ts=last_seen)
+            log.info("session %s answered in %.0fs (error=%s)", key, time.time() - started, is_error)
+            return answer
+        except RuntimeError as error:
+            if attempt:
+                raise
+            log.warning("session %s failed, retrying with a new one: %s", key, error)
+
+
 def work(channel: str, thread_ts: str, requests: list) -> None:
     stop_status = show_working(channel, thread_ts)
+    with lock:
+        state = busy.get(thread_ts) or {}
+        resumed = state.pop("resumed", False)
 
     def reply(text: str) -> None:
         stop_status()
         post(channel, thread_ts, text)
+        with lock:
+            if busy.get(thread_ts) is state:
+                state["answered"] = True  # a restart before the reply_done event must not rerun it
+                save_runs()
         if config.STATUS:
             set_status(channel, thread_ts, "")  # agent sessions stay "working" after a reply until told otherwise
 
     key = f"{channel}:{thread_ts}"
     requesters = " ".join(sorted({f"<@{user}>" for _, user in requests}))
     try:
-        for attempt in range(2):
-            prompt, last_seen = thread_prompt(channel, thread_ts, requests, key)
-            with lock:
-                if thread_ts in busy:
-                    busy[thread_ts]["seen_until"] = float(last_seen)
-            try:
-                started = time.time()
-                answer, is_error = claude_cli.run(key, prompt)
-                claude_cli.update(key, seen_ts=last_seen)
-                log.info("session %s answered in %.0fs (error=%s)", key, time.time() - started, is_error)
-                break
-            except RuntimeError as error:
-                if attempt:
-                    raise
-                log.warning("session %s failed, retrying with a new one: %s", key, error)
+        if not run_slots.acquire(blocking=False):
+            log.info("session %s waits: %d runs already working", key, config.MAX_RUNS)
+            run_slots.acquire()
+        try:
+            answer = run_session(channel, thread_ts, requests, key, resumed)
+        finally:
+            run_slots.release()
         reply(answer or f"{requesters} the Claude session ended without an answer.")
     except claude_cli.Stopped:
         with lock:
@@ -474,6 +577,7 @@ def reply_done(thread_ts: str) -> None:
         state = busy.pop(thread_ts, None)
         if not state:
             return
+        save_runs()
         seen_until = state.get("seen_until", state.get("fired_at", 0) + SEEN_WINDOW_SECONDS)
         pending = [(ts, user) for ts, user in state["pending"] if float(ts) > seen_until]
         if len(pending) < len(state["pending"]):
@@ -481,7 +585,8 @@ def reply_done(thread_ts: str) -> None:
         if not pending:
             return
         state["pending"] = pending
-        busy[thread_ts] = {"since": time.time(), "channel": state["channel"], "pending": []}
+        busy[thread_ts] = {"since": time.time(), "channel": state["channel"], "requests": pending, "pending": []}
+        save_runs()
     start(state["channel"], thread_ts, state["pending"])
 
 
@@ -518,6 +623,7 @@ def on_session_stopped(event: dict) -> None:
         if running:
             state["pending"] = []
             state["stopped_by"] = user
+            save_runs()
     if running:
         log.info("stop in %s from %s", thread_ts, user)
         claude_cli.stop(f"{channel}:{thread_ts}")
@@ -553,5 +659,7 @@ if __name__ == "__main__":
     if not config.ALLOWED_USERS:
         log.warning("CLAUDINO_ALLOWED_USERS is empty: claudino will ignore every message")
     log.info("alerts %s, permission mode %s", "on" if config.alerts_enabled() else "off", config.PERMISSION_MODE)
+    threading.Thread(target=prune_files_daily, daemon=True).start()
     catch_up()
+    resume_runs()
     SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"]).start()
