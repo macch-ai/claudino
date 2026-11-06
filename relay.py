@@ -401,7 +401,7 @@ def forwarded_thread(a: dict, since: str | None = None) -> str:
     for m in messages:
         mark = " (the forwarded message)" if m.get("ts") == ts else ""
         author = "claudino" if is_from_claudino(m) else f"<@{m.get('user') or m.get('bot_id')}>"
-        lines.append(f"  [{m['ts']}] {author}{mark}: {render(m, follow_forwards=False)}")
+        lines.append(f"  [{m['ts']}] {author}{mark}: {render(m, follow_forwards=False, fence=False)}")
     title = (f"new messages in the thread of the forwarded message {ts} in <#{channel}>" if since is not None
              else f"thread of the forwarded message in <#{channel}>, {len(messages)} messages")
     return f"[{title}]:\n" + "\n".join(lines)
@@ -420,12 +420,30 @@ def forwarded_updates(messages: list, seen_ts: str) -> list:
             done.add(source)
             update = forwarded_thread(a, since=seen_ts)
             if update:
-                updates.append(update)
+                updates.append(untrusted(update, "thread of a forwarded message"))
     return updates
 
 
-def render(m: dict, follow_forwards: bool = True) -> str:
-    """A message's text plus its files and forwarded/shared messages (with their threads)."""
+UNTRUSTED_TAG = re.compile(r"</?\s*untrusted\b[^>]*>", re.IGNORECASE)
+
+
+def untrusted(text: str, source: str) -> str:
+    """Fence text from someone who cannot give claudino orders, so the session reads it as data.
+    Tags inside the text are removed, so it cannot close the fence early."""
+    if not text:
+        return ""
+    source = re.sub(r'["<>]', "", source)
+    return f'<untrusted source="{source}">\n{UNTRUSTED_TAG.sub("[tag removed]", text)}\n</untrusted>'
+
+
+def trusted(m: dict) -> bool:
+    """claudino's own messages and the allowlisted teammates'; everything else is data."""
+    return is_from_claudino(m) or m.get("user") in config.ALLOWED_USERS
+
+
+def render(m: dict, follow_forwards: bool = True, fence: bool = True) -> str:
+    """A message's text plus its files and forwarded/shared messages (with their threads).
+    Forwarded content is fenced as untrusted unless fence is False (the caller fences it all)."""
     parts = [m.get("text") or ""]
     for f in m.get("files") or []:
         parts.append(file_note(f, m["ts"]))
@@ -433,11 +451,13 @@ def render(m: dict, follow_forwards: bool = True) -> str:
         who = a.get("author_name") or a.get("author_subname") or a.get("channel_name") or ""
         body = a.get("text") or a.get("fallback") or ""
         if body or who:
-            parts.append(f"[forwarded/shared message from {who}]: {body}")
+            note = f"[forwarded/shared message from {who}]: {body}"
+            parts.append(untrusted(note, f"forwarded message from {who}") if fence else note)
         for f in a.get("files") or []:
             parts.append(file_note(f, m["ts"]))
         if follow_forwards:
-            parts.append(forwarded_thread(a))
+            thread = forwarded_thread(a)
+            parts.append(untrusted(thread, "thread of a forwarded message") if fence else thread)
     return "\n".join(p for p in parts if p)
 
 
@@ -454,7 +474,10 @@ def thread_prompt(channel: str, thread_ts: str, requests: list, key: str, resume
     lines = []
     for m in new:
         author = "claudino (you)" if is_from_claudino(m) else f"<@{m.get('user') or m.get('bot_id')}>"
-        lines.append(f"[{m['ts']}] {author}: {render(m)}")
+        if trusted(m):
+            lines.append(f"[{m['ts']}] {author}: {render(m)}")
+        else:
+            lines.append(f"[{m['ts']}] {author}: " + untrusted(render(m, fence=False), f"{author}, not on the allowlist"))
     if not fresh:
         lines += forwarded_updates(messages, seen_ts)
     requesters = " ".join(sorted({f"<@{user}>" for _, user in requests}))
