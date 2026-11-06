@@ -8,6 +8,9 @@ since production deploys only from `main`:
 ssh <server> 'cd ~/claude-relay && .venv/bin/python scripts/slack-probe.py <method> name=value ...'
 ```
 
+With the relay in its own user (`deploy/setup-relay-user.sh`), only that user can read the token, so a person runs it:
+`cd /home/claudino/claude-relay && sudo -H -u claudino .venv/bin/python scripts/slack-probe.py ...`.
+
 Open the thread in Slack web (Claude in Chrome) to see the result. Hover off the status to read
 its resting text. Reset the thread when done (`agents.sessions.setStatus ... status=active`).
 
