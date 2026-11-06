@@ -35,7 +35,7 @@ flowchart LR
 | [`claudino_instructions.md`](claudino_instructions.md) | System prompt appended to every session |
 | [`fire_claude.py`](fire_claude.py) | Fires the alert routine through its API trigger |
 | [`deploy/`](deploy) | systemd units and the optional CI deployer |
-| [`scripts/`](scripts) | `test.sh`, `set-tokens.sh`, `deploy.sh` |
+| [`scripts/`](scripts) | `test.sh`, `set-tokens.sh`, `deploy.sh`, `slack-probe.py` |
 
 ## Quick start
 
