@@ -672,7 +672,11 @@ def catch_up() -> None:
         remember(str(time.time()))
         return
     oldest = str(max(float(LAST_ALERT_FILE.read_text()), time.time() - MAX_CATCH_UP_SECONDS))
-    history = app.client.conversations_history(channel=config.ALERT_CHANNEL, oldest=oldest, limit=200)["messages"]
+    try:
+        history = app.client.conversations_history(channel=config.ALERT_CHANNEL, oldest=oldest, limit=200)["messages"]
+    except SlackApiError as e:  # for example not_in_channel after a reinstall: run without catching up
+        log.warning("cannot read missed alerts in %s: %s", config.ALERT_CHANNEL, e.response.get("error"))
+        return
     for message in reversed(history):
         if is_sentry_alert(message) and message["ts"] != oldest:
             hand_over(message["ts"])
