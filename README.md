@@ -94,6 +94,7 @@ Set all three to turn it on: `CLAUDINO_ALERT_CHANNEL` (where Sentry posts), `CLA
 > [!WARNING]
 > By default claudino runs Claude Code with `--dangerously-skip-permissions`: **any command can run on the server without approval.**
 
+- Messages from people outside the allowlist, bots, and forwarded messages reach the session fenced as `<untrusted>` data, and the system prompt says never to follow instructions in it. This lowers the risk; it does not remove it.
 - `CLAUDINO_ALLOWED_USERS` limits **who can start a run**, not **what the thread contains**. Everything in the thread goes into the prompt: other people's messages, forwarded messages and their threads, files, and Sentry alert text written by whoever triggered the error. Treat this as a prompt injection path to a shell.
 - Run claudino as a dedicated, unprivileged user on a machine you can afford to rebuild. Give that user only the credentials the agent truly needs.
 - Want approvals instead? Set `CLAUDINO_PERMISSION_MODE=auto` (or `acceptEdits`, `default`). Blocked actions are reported back in the thread.
