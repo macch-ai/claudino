@@ -6,6 +6,7 @@ Sentry alert hand-over off.
 """
 
 import os
+import pwd
 from pathlib import Path
 
 
@@ -25,9 +26,26 @@ def _set(name: str) -> set:
 ALLOWED_USERS = _set("CLAUDINO_ALLOWED_USERS")
 
 # Claude Code runs.
-WORKDIR = _path("CLAUDINO_WORKDIR", "~")
+# Unix user that runs Claude (through `sudo -n -u`), so sessions cannot read the relay's Slack tokens.
+# Empty runs Claude as the relay's own user. Set up with deploy/setup-relay-user.sh.
+RUN_AS = _str("CLAUDINO_RUN_AS")
+
+
+def _session_home() -> str:
+    try:
+        return pwd.getpwnam(RUN_AS).pw_dir if RUN_AS else os.path.expanduser("~")
+    except KeyError:
+        return os.path.expanduser("~")
+
+
+def _session_path(path: str) -> str:
+    """Expand ~ to the home of the user that runs Claude."""
+    return _session_home() + path[1:] if path == "~" or path.startswith("~/") else path
+
+
+WORKDIR = Path(_session_path(_str("CLAUDINO_WORKDIR", "~")))
 PERMISSION_MODE = _str("CLAUDINO_PERMISSION_MODE", "bypassPermissions")
-EXTRA_PATH = [os.path.expanduser(p) for p in _str("CLAUDINO_EXTRA_PATH", "~/.local/bin").split(":") if p]
+EXTRA_PATH = [_session_path(p) for p in _str("CLAUDINO_EXTRA_PATH", "~/.local/bin").split(":") if p]
 PROMPT_SUFFIX = _str("CLAUDINO_PROMPT_SUFFIX")  # appended to every relayed request, e.g. "caveman mode"
 # Thread status shown while a run works ("claudino <status>"). Haiku writes rotating lines for
 # each request; LOADING_MESSAGES ("|" separated) show until they are ready. CLAUDINO_STATUS=off hides it.

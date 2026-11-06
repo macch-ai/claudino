@@ -232,9 +232,9 @@ def clean_request(text: str) -> str:
 
 def haiku(prompt: str) -> str:
     """One quick, tool-less Claude Haiku answer."""
-    proc = subprocess.run(
-        ["claude", "-p", prompt, "--model", "haiku", "--tools", "", "--output-format", "json"],
-        cwd="/tmp", env=claude_cli._env(), capture_output=True, text=True, timeout=20)
+    cmd, cwd = claude_cli.command(
+        ["claude", "-p", prompt, "--model", "haiku", "--tools", "", "--output-format", "json"], "/tmp")
+    proc = subprocess.run(cmd, cwd=cwd, env=claude_cli._env(), capture_output=True, text=True, timeout=20)
     return json.loads(proc.stdout).get("result", "").strip()
 
 
@@ -681,7 +681,8 @@ def catch_up() -> None:
 if __name__ == "__main__":
     if not config.ALLOWED_USERS:
         log.warning("CLAUDINO_ALLOWED_USERS is empty: claudino will ignore every message")
-    log.info("alerts %s, permission mode %s", "on" if config.alerts_enabled() else "off", config.PERMISSION_MODE)
+    log.info("alerts %s, permission mode %s, Claude runs as %s", "on" if config.alerts_enabled() else "off",
+             config.PERMISSION_MODE, config.RUN_AS or "this user")
     threading.Thread(target=prune_files_daily, daemon=True).start()
     catch_up()
     resume_runs()

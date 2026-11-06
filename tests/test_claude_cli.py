@@ -93,6 +93,7 @@ class ClaudeCliTest(unittest.TestCase):
                 mock.patch.object(claude_cli, "config") as config:
             config.with_suffix = lambda p: p
             config.WORKDIR, config.TIMEOUT_SECONDS, config.EXTRA_PATH = self.tmp, 30, []
+            config.RUN_AS = ""
             config.LOCAL_INSTRUCTIONS_FILE = Path(self.tmp) / "none.md"
             script = Path(self.tmp) / "claude"
             # The tool runs in its own session, like Claude's Bash tool does, so a group kill misses it.
@@ -143,6 +144,34 @@ class ClaudeCliTest(unittest.TestCase):
             with self.assertRaises(claude_cli.Stopped):
                 claude_cli.run("k", "prompt")
         self.assertEqual(claude_cli.get("k"), {"session_id": "S1", "seen_ts": "9.0"})
+
+    def test_run_as_goes_through_sudo_in_the_workdir(self):
+        with mock.patch.multiple(claude_cli.config, RUN_AS="agent", EXTRA_PATH=["/home/agent/.local/bin"]):
+            cmd, cwd = claude_cli.command(["claude", "-p", "x"], "/home/agent")
+        self.assertEqual(cmd[:6], ["sudo", "-n", "-H", "-u", "agent", "--"])
+        self.assertIn("PATH=/home/agent/.local/bin:/usr/local/bin:/usr/bin:/bin", cmd)
+        self.assertEqual(cmd[-4:], ["/home/agent", "claude", "-p", "x"])
+        self.assertEqual(cwd, "/")
+
+    def test_run_as_command_changes_directory_and_runs(self):
+        with mock.patch.multiple(claude_cli.config, RUN_AS="agent", EXTRA_PATH=[]):
+            cmd, _ = claude_cli.command(["pwd"], self.tmp)
+        shell = cmd[cmd.index("sh"):]  # what sudo would run, minus sudo itself
+        out = claude_cli.subprocess.run(shell, capture_output=True, text=True).stdout.strip()
+        self.assertEqual(os.path.realpath(out), os.path.realpath(self.tmp))
+
+    def test_without_run_as_the_command_is_unchanged(self):
+        with mock.patch.object(claude_cli.config, "RUN_AS", ""):
+            self.assertEqual(claude_cli.command(["claude"], "/w"), (["claude"], "/w"))
+
+    def test_kill_falls_back_to_sudo_for_the_session_user(self):
+        proc = mock.Mock(pid=10)
+        with mock.patch.object(claude_cli.config, "RUN_AS", "agent"), \
+                mock.patch.object(claude_cli, "_tree", return_value=[10, 11]), \
+                mock.patch.object(claude_cli.os, "kill", side_effect=[None, PermissionError()]), \
+                mock.patch.object(claude_cli.subprocess, "run") as run:
+            claude_cli._kill(proc)
+        self.assertEqual(run.call_args.args[0], ["sudo", "-n", "-u", "agent", "--", "kill", "-KILL", "11"])
 
     def test_sessions_never_get_slack_tokens(self):
         with mock.patch.dict(os.environ, {"SLACK_BOT_TOKEN": "x", "SLACK_APP_TOKEN": "y", "PATH": "/usr/bin"}):

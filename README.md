@@ -75,6 +75,7 @@ All settings live in `~/.config/claude-relay/env`. [`.env.example`](.env.example
 | `CLAUDINO_WORKDIR` | `~` | Where sessions start |
 | `CLAUDINO_PERMISSION_MODE` | `bypassPermissions` | `bypassPermissions` runs `--dangerously-skip-permissions`; anything else goes to `--permission-mode` |
 | `CLAUDINO_EXTRA_PATH` | `~/.local/bin` | Extra `PATH` entries for sessions |
+| `CLAUDINO_RUN_AS` | empty | Unix user that runs Claude through sudo, so sessions cannot read the Slack tokens (see Security) |
 | `CLAUDINO_PROMPT_SUFFIX` | empty | Text appended to every relayed request |
 | `CLAUDINO_STATUS` | `is working on it...` | Loading status shown in the thread while a run works; `off` hides it |
 | `CLAUDINO_LOADING_MESSAGES` | empty | Fallback loading lines, separated by `\|` (max 10), shown until Haiku's lines for the request are ready or when it fails |
@@ -98,7 +99,7 @@ Set all three to turn it on: `CLAUDINO_ALERT_CHANNEL` (where Sentry posts), `CLA
 - `CLAUDINO_ALLOWED_USERS` limits **who can start a run**, not **what the thread contains**. Everything in the thread goes into the prompt: other people's messages, forwarded messages and their threads, files, and Sentry alert text written by whoever triggered the error. Treat this as a prompt injection path to a shell.
 - Run claudino as a dedicated, unprivileged user on a machine you can afford to rebuild. Give that user only the credentials the agent truly needs.
 - Want approvals instead? Set `CLAUDINO_PERMISSION_MODE=auto` (or `acceptEdits`, `default`). Blocked actions are reported back in the thread.
-- Slack tokens are never passed to sessions: `claude_cli._env()` strips every `SLACK_*` variable.
+- Slack tokens are never passed to sessions: `claude_cli._env()` strips every `SLACK_*` variable. That alone does not stop a session from reading them: with one Unix user, a session can read the env file. Run `sudo deploy/setup-relay-user.sh <user>` once: the relay and the deployer then run as the user `claudino` (system units `claudino.service`, `claudino-deployer.service`), which alone can read the tokens, and Claude runs as `<user>` through sudo, keeping that user's logins and tools. It undoes itself if the relay does not come up; `--undo` goes back. Rotate the Slack tokens afterwards.
 
 ## Deploying from CI (optional)
 

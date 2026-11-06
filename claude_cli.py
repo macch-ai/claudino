@@ -46,6 +46,16 @@ def _env() -> dict:
     return env
 
 
+def command(args: list, cwd) -> tuple[list, str]:
+    """The command line and working directory that run args in cwd as the user that runs Claude.
+    With CLAUDINO_RUN_AS it goes through sudo, which starts from a clean environment."""
+    if not config.RUN_AS:
+        return args, str(cwd)
+    path = ":".join(config.EXTRA_PATH + ["/usr/local/bin", "/usr/bin", "/bin"])
+    return (["sudo", "-n", "-H", "-u", config.RUN_AS, "--", "env", f"PATH={path}",
+             "sh", "-c", 'cd "$0" && exec "$@"', str(cwd), *args], "/")
+
+
 def permission_args() -> list:
     """bypassPermissions (the default) skips every permission check; any other mode is passed through."""
     if config.PERMISSION_MODE == "bypassPermissions":
@@ -79,12 +89,19 @@ def _tree(pid: int) -> list:
 
 
 def _kill(proc: subprocess.Popen) -> None:
-    """Kill claude and every tool it started, found before any of them dies and gets reparented."""
+    """Kill claude and every tool it started, found before any of them dies and gets reparented.
+    Processes of CLAUDINO_RUN_AS are killed through sudo (sudo itself exits with its child)."""
+    theirs = []
     for pid in _tree(proc.pid):
         try:
             os.kill(pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
+        except PermissionError:
+            theirs.append(str(pid))
+    if theirs and config.RUN_AS:
+        subprocess.run(["sudo", "-n", "-u", config.RUN_AS, "--", "kill", "-KILL", *theirs],
+                       capture_output=True, timeout=30)
 
 
 def stop(key: str) -> None:
@@ -111,7 +128,8 @@ def _claude(prompt: str, session_id: str | None, key: str = "", new: bool = Fals
         if key in _stopped:
             _stopped.discard(key)
             raise Stopped()
-        proc = subprocess.Popen(cmd, cwd=config.WORKDIR, env=_env(), stdout=subprocess.PIPE,
+        cmd, cwd = command(cmd, config.WORKDIR)
+        proc = subprocess.Popen(cmd, cwd=cwd, env=_env(), stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, start_new_session=True)
         _running[key] = proc
     try:

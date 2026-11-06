@@ -1,0 +1,20 @@
+# Installed by deploy/setup-relay-user.sh: the relay runs as its own user, which alone can read the
+# Slack tokens, and starts Claude as CLAUDINO_RUN_AS through sudo.
+[Unit]
+Description=claudino: Slack relay to Claude Code
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=claudino
+Group=claudino
+# Files it downloads stay readable by its group, which holds the user that runs Claude.
+UMask=0027
+EnvironmentFile=/home/claudino/.config/claude-relay/env
+ExecStart=/home/claudino/claude-relay/.venv/bin/python /home/claudino/claude-relay/relay.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
