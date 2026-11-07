@@ -77,6 +77,7 @@ class Progress:
         self.clock = clock
         self.lock = threading.Lock()
         self.ts = None  # the current stream message
+        self.messages = []  # every stream message this run posted, oldest first
         self.started = 0.0
         self.text_chars = 0
         self.stream_tasks = set()  # tasks the current stream message shows
@@ -146,6 +147,7 @@ class Progress:
                                                             **self.recipient)
                     self.ts, self.started, self.text_chars, self.stream_tasks = response["ts"], self.clock(), 0, set()
                     STREAM_MESSAGES.add(self.ts)
+                    self.messages.append(self.ts)
                 else:
                     self.client.chat_appendStream(channel=self.channel, ts=self.ts, chunks=chunks)
                 self._count(chunks)
@@ -193,3 +195,13 @@ class Progress:
                     task["status"] = "complete" if ok else "error"
                     self.queue.append(self._task(task_id))
         self.flush(final=True)
+
+    def delete(self) -> None:
+        """Delete the run's progress messages: the answer is posted and the steps are no longer needed.
+        A message Slack will not delete stays; the others still go."""
+        for ts in self.messages:
+            try:
+                self.client.chat_delete(channel=self.channel, ts=ts)
+            except SlackApiError as error:
+                log.warning("deleting progress %s in %s failed: %s", ts, self.thread_ts, error.response.get("error"))
+        self.messages = []

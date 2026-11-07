@@ -88,6 +88,18 @@ class ProgressTest(unittest.TestCase):
         self.p.close(ok=False)
         self.assertEqual(self.client.chat_stopStream.call_args.kwargs["chunks"][0]["status"], "error")
 
+    def test_delete_removes_every_stream_message_and_survives_errors(self):
+        self.p.on_event(turn(tool("t1")))
+        self.p.flush()
+        self.now = progress.ROTATE_SECONDS + 1
+        self.p.on_event(turn(tool("t2")))
+        self.p.flush()
+        self.p.close()
+        self.client.chat_delete.side_effect = [SlackApiError("no", {"error": "message_not_found"}), None]
+        self.p.delete()
+        self.assertEqual([c.kwargs for c in self.client.chat_delete.call_args_list],
+                         [{"channel": "C1", "ts": "1.0"}, {"channel": "C1", "ts": "2.0"}])
+
     def test_slack_errors_turn_the_stream_off(self):
         self.client.chat_startStream.side_effect = SlackApiError("no", {"error": "channel_type_not_supported"})
         self.p.on_event(turn(tool("t1")))

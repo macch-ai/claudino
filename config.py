@@ -57,6 +57,9 @@ STATUS = "" if _str("CLAUDINO_STATUS").lower() == "off" else _str("CLAUDINO_STAT
 LOADING_MESSAGES = [part.strip() for part in _str("CLAUDINO_LOADING_MESSAGES").split("|") if part.strip()][:10] or None
 # Stream each run's tool calls and narration into the thread as Slack task cards; "off" hides them.
 STREAM = _str("CLAUDINO_STREAM", "on").lower() != "off"
+# The progress messages are deleted once the answer is posted, unless this is "on". Failed or stopped
+# runs keep them either way: they show how far the run got.
+KEEP_PROGRESS = _str("CLAUDINO_KEEP_PROGRESS", "off").lower() == "on"
 TIMEOUT_SECONDS = int(_str("CLAUDINO_TIMEOUT_SECONDS", str(50 * 60)))
 MAX_RUNS = max(1, int(_str("CLAUDINO_MAX_RUNS", "3")))  # Claude runs at once; more threads wait their turn
 FILES_KEEP_DAYS = int(_str("CLAUDINO_FILES_KEEP_DAYS", "14"))  # downloaded Slack files are deleted after this; 0 keeps them

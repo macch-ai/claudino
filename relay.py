@@ -562,9 +562,9 @@ def footer(model: str) -> str:
     return f"{model or config.MODEL or 'default model'} · {config.EFFORT} effort"
 
 
-def post(channel: str, thread_ts: str, text: str, footer: str = "") -> None:
+def post(channel: str, thread_ts: str, text: str, footer: str = "") -> bool:
     """Post an answer, its card as blocks, and the footer under it: small grey text below the blocks,
-    an italic last line in the text."""
+    an italic last line in the text. Returns whether Slack took it."""
     text, blocks = answer_message(text)
     if footer:
         note = f"\n\n_{footer}_"
@@ -580,9 +580,11 @@ def post(channel: str, thread_ts: str, text: str, footer: str = "") -> None:
                 raise
             log.warning("blocks refused in %s (%s): posting text only", thread_ts, error.response.get("error"))
             app.client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=text[:39000], unfurl_links=False)
+        return True
     except SlackApiError as error:
         log.error("post in %s failed: %s", thread_ts, error.response.get("error"))
         reply_done(thread_ts)
+        return False
 
 
 def run_session(channel: str, thread_ts: str, requests: list, key: str, resumed: bool,
@@ -620,7 +622,9 @@ def work(channel: str, thread_ts: str, requests: list) -> None:
             live.close(ok)
         with lock:
             state["final"] = True
-        post(channel, thread_ts, text, footer)
+        posted = post(channel, thread_ts, text, footer)
+        if live and ok and posted and not config.KEEP_PROGRESS:
+            live.delete()  # the answer is in: the steps that led to it only clutter the thread
         with lock:
             if busy.get(thread_ts) is state:
                 state["answered"] = True  # a restart before the reply_done event must not rerun it

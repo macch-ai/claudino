@@ -51,6 +51,11 @@ its resting text. Reset the thread when done (`agents.sessions.setStatus ... sta
   stream at 9 minutes or near a cap and opens a new one, carrying tasks still in progress over.
 - The stream's own message events must not end the run: `on_message` skips claudino messages while
   the thread's run streams and has not posted its answer, and every stream message `ts`.
+- Once the answer is posted, `Progress.delete()` removes every stream message of the run with
+  `chat.delete` (bots may delete their own messages with `chat:write`). Failed or stopped runs keep
+  them, and so does `CLAUDINO_KEEP_PROGRESS=on`. The deletion's `message_deleted` event has a subtype,
+  so `on_message` ignores it. Probed live 2026-11-07 (#claudino-test): a stopped stream message deletes
+  and leaves no "message deleted" placeholder in the thread.
 - Probed live 2026-11-07 (#claudino-test): start, append (complete and error tasks) and stop all work
   in a channel thread. The stream message carries `user`, `streaming_state` and `blocks`; its `text`
   holds the narration plus the task titles. Probe again with
