@@ -340,10 +340,44 @@ class EmojiTest(RelayTest):
         self.assertEqual(names, ["not_an_emoji", "eyes"])
 
 
+DONE = "done!\n\n_claude-opus-5-5 · medium effort_"
+
+
+class FooterTest(RelayTest):
+    def test_footer_shows_the_reported_model_and_the_configured_effort(self):
+        with mock.patch.multiple(self.r.config, MODEL="opus", EFFORT="high"):
+            self.assertEqual(self.r.footer("claude-opus-5-5"), "claude-opus-5-5 · high effort")
+            self.assertEqual(self.r.footer(""), "opus · high effort")
+        with mock.patch.multiple(self.r.config, MODEL="", EFFORT="medium"):
+            self.assertEqual(self.r.footer(""), "default model · medium effort")
+
+    def answer(self, text):
+        posted = []
+        self.client.chat_postMessage.side_effect = lambda **kw: posted.append(kw)
+        with mock.patch.object(self.r, "show_working", return_value=lambda: None), \
+                mock.patch.object(self.r, "run_session", return_value=(text, "claude-opus-5-5")), \
+                mock.patch.multiple(self.r.config, STATUS="", STREAM=False, EFFORT="medium"):
+            self.r.work("C1", "1.0", [("1.0", ALICE)])
+        return posted[0]
+
+    def test_long_answers_keep_the_footer(self):
+        text = self.answer("x" * 50000)["text"]
+        self.assertEqual(len(text), 39000)
+        self.assertTrue(text.endswith("_claude-opus-5-5 · medium effort_"))
+
+    def test_cards_end_with_the_footer_as_small_text(self):
+        card = '[{"type": "text", "text": "more"}]'
+        posted = self.answer(f"hi\n```card\n{card}\n```")
+        self.assertEqual(posted["blocks"][-1], {"type": "context", "elements": [
+            {"type": "mrkdwn", "text": "claude-opus-5-5 · medium effort"}]})
+        self.assertTrue(posted["text"].endswith("_claude-opus-5-5 · medium effort_"))
+
+
 class StatusTest(RelayTest):
     def setUp(self):
         super().setUp()
-        patcher = mock.patch.multiple(self.r.config, STATUS="is working on it...", LOADING_MESSAGES=["Warming up"])
+        patcher = mock.patch.multiple(self.r.config, STATUS="is working on it...", LOADING_MESSAGES=["Warming up"],
+                                      EFFORT="medium")
         patcher.start()
         self.addCleanup(patcher.stop)
         self.r.loading_messages.clear()
@@ -362,16 +396,17 @@ class StatusTest(RelayTest):
 
     def work(self, run=None):
         with mock.patch.object(self.r, "thread_prompt", return_value=("prompt", "3.0")), \
-                mock.patch.object(self.r.claude_cli, "run", side_effect=run or (lambda key, prompt, on_event: ("done!", False))), \
+                mock.patch.object(self.r.claude_cli, "run",
+                                  side_effect=run or (lambda key, prompt, on_event: ("done!", False, "claude-opus-5-5"))), \
                 mock.patch.object(self.r.claude_cli, "update"):
             self.r.work("C1", "1.0", [("1.0", ALICE)])
 
     def test_status_shows_while_working_and_stops_before_the_answer(self):
         def run(key, prompt, on_event):
             self.wait_for(lambda: self.calls)
-            return "done!", False
+            return "done!", False, "claude-opus-5-5"
         self.work(run)
-        self.assertEqual(self.calls, [("status", "is working on it...", ["Warming up"]), ("post", "done!"),
+        self.assertEqual(self.calls, [("status", "is working on it...", ["Warming up"]), ("post", DONE),
                                       ("status", "", None)])
         kwargs = self.client.assistant_threads_setStatus.call_args.kwargs
         self.assertEqual((kwargs["channel_id"], kwargs["thread_ts"]), ("C1", "1.0"))
@@ -401,7 +436,7 @@ class StatusTest(RelayTest):
             self.work()
         pick.assert_not_called()
         self.client.assistant_threads_setStatus.assert_not_called()
-        self.assertEqual(self.calls, [("post", "done!")])
+        self.assertEqual(self.calls, [("post", DONE)])
 
     def test_failed_post_clears_the_status(self):
         self.client.chat_postMessage.side_effect = SlackApiError("bad", {"error": "channel_not_found"})
@@ -540,7 +575,7 @@ class RunSlotsTest(RelayTest):
             seen.append(len(running))
             release.wait(5)
             running.pop()
-            return "ok"
+            return "ok", ""
         mock.patch.object(self.r, "run_session", side_effect=session).start()
         threads = [threading.Thread(target=self.r.work, args=("C1", ts, [(ts, ALICE)])) for ts in ("1.0", "2.0")]
         for t in threads:
@@ -710,7 +745,7 @@ class StreamingRunTest(RelayTest):
                 {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "gh pr checks 12"}}]}})
             self.wait_for_stream()
             on_event({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1"}]}})
-            return "done!", False
+            return "done!", False, "claude-opus-5-5"
         self.work(run)
         start = self.client.chat_startStream.call_args.kwargs
         self.assertEqual((start["recipient_user_id"], start["thread_ts"]), (ALICE, "1.0"))

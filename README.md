@@ -82,6 +82,7 @@ All settings live in `~/.config/claude-relay/env`. [`.env.example`](.env.example
 | `CLAUDINO_PERMISSION_MODE` | `bypassPermissions` | `bypassPermissions` runs `--dangerously-skip-permissions`; anything else goes to `--permission-mode` |
 | `CLAUDINO_EXTRA_PATH` | `~/.local/bin` | Extra `PATH` entries for sessions |
 | `CLAUDINO_RUN_AS` | empty | Unix user that runs Claude through sudo, so sessions cannot read the Slack tokens (see Security) |
+| `CLAUDINO_MODEL`, `CLAUDINO_EFFORT` | Claude Code's model, `medium` | `--model` and `--effort` for sessions. Every answer ends with a footer naming the model Claude used and this effort |
 | `CLAUDINO_PROMPT_SUFFIX` | empty | Text appended to every relayed request |
 | `CLAUDINO_STATUS` | `is working on it...` | Loading status shown in the thread while a run works; `off` hides it |
 | `CLAUDINO_LOADING_MESSAGES` | empty | Fallback loading lines, separated by `\|` (max 10), shown until Haiku's lines for the request are ready or when it fails |

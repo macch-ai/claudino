@@ -68,6 +68,18 @@ def permission_args() -> list:
     return ["--permission-mode", config.PERMISSION_MODE]
 
 
+def model_args() -> list:
+    """--model and --effort when CLAUDINO_MODEL / CLAUDINO_EFFORT set them."""
+    args = ["--model", config.MODEL] if config.MODEL else []
+    return args + (["--effort", config.EFFORT] if config.EFFORT else [])
+
+
+def main_model(data: dict) -> str:
+    """The model that did most of the run: Claude's result lists every model it used (Haiku helpers too)."""
+    usage = data.get("modelUsage") or {}
+    return max(usage, key=lambda name: usage[name].get("costUSD") or 0, default="")
+
+
 def instructions() -> str:
     """The shared system prompt plus this machine's private additions, when there are any."""
     text = INSTRUCTIONS_FILE.read_text()
@@ -139,7 +151,7 @@ def clear_stop(key: str) -> None:
 def _claude(prompt: str, session_id: str | None, key: str = "", new: bool = False, on_event=None) -> dict:
     """Run claude and return its result event. Every other event of its stream-json output goes to
     on_event as it arrives (assistant turns, tool results), so the relay can show the work live."""
-    cmd = ["claude", "-p", "--output-format", "stream-json", "--verbose", *permission_args(),
+    cmd = ["claude", "-p", "--output-format", "stream-json", "--verbose", *permission_args(), *model_args(),
            "--append-system-prompt-file", instructions_file()]
     if session_id:
         cmd += ["--session-id" if new else "--resume", session_id]
@@ -200,8 +212,8 @@ def _claude(prompt: str, session_id: str | None, key: str = "", new: bool = Fals
     return result
 
 
-def run(key: str, prompt: str, on_event=None) -> tuple[str, bool]:
-    """Send prompt to the thread's session, resuming it when there is one. Returns (answer, is_error).
+def run(key: str, prompt: str, on_event=None) -> tuple[str, bool, str]:
+    """Send prompt to the thread's session, resuming it when there is one. Returns (answer, is_error, model).
     on_event gets the run's stream-json events as they arrive.
     Raises Stopped when a user stops the run; the thread keeps its session.
     A new session's ID is saved before it starts, so a run a restart cuts off can be resumed."""
@@ -217,4 +229,4 @@ def run(key: str, prompt: str, on_event=None) -> tuple[str, bool]:
         raise
     if data.get("session_id"):
         update(key, session_id=data["session_id"])
-    return data.get("result") or "", bool(data.get("is_error"))
+    return data.get("result") or "", bool(data.get("is_error")), main_model(data)

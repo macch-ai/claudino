@@ -557,8 +557,20 @@ def answer_message(answer: str) -> tuple[str, list | None]:
         return f"{text}\n_(card left out: {error})_", None
 
 
-def post(channel: str, thread_ts: str, text: str) -> None:
+def footer(model: str) -> str:
+    """The line under each answer: the model Claude reports and the configured effort."""
+    return f"{model or config.MODEL or 'default model'} · {config.EFFORT} effort"
+
+
+def post(channel: str, thread_ts: str, text: str, footer: str = "") -> None:
+    """Post an answer, its card as blocks, and the footer under it: small grey text below the blocks,
+    an italic last line in the text."""
     text, blocks = answer_message(text)
+    if footer:
+        note = f"\n\n_{footer}_"
+        text = text[:39000 - len(note)] + note
+        if blocks and len(blocks) < cards.MAX_BLOCKS:
+            blocks = blocks + [{"type": "context", "elements": [{"type": "mrkdwn", "text": footer}]}]
     try:
         try:
             app.client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=text[:39000], blocks=blocks,
@@ -573,8 +585,10 @@ def post(channel: str, thread_ts: str, text: str) -> None:
         reply_done(thread_ts)
 
 
-def run_session(channel: str, thread_ts: str, requests: list, key: str, resumed: bool, on_event=None) -> str:
-    """Hand the thread's new messages to its Claude session; retry once with a new session."""
+def run_session(channel: str, thread_ts: str, requests: list, key: str, resumed: bool,
+                on_event=None) -> tuple[str, str]:
+    """Hand the thread's new messages to its Claude session; retry once with a new session.
+    Returns (answer, model)."""
     for attempt in range(2):
         prompt, last_seen = thread_prompt(channel, thread_ts, requests, key, resumed)
         with lock:
@@ -582,10 +596,10 @@ def run_session(channel: str, thread_ts: str, requests: list, key: str, resumed:
                 busy[thread_ts]["seen_until"] = float(last_seen)
         try:
             started = time.time()
-            answer, is_error = claude_cli.run(key, prompt, on_event)
+            answer, is_error, model = claude_cli.run(key, prompt, on_event)
             claude_cli.update(key, seen_ts=last_seen)
-            log.info("session %s answered in %.0fs (error=%s)", key, time.time() - started, is_error)
-            return answer
+            log.info("session %s answered in %.0fs (error=%s, model=%s)", key, time.time() - started, is_error, model)
+            return answer, model
         except RuntimeError as error:
             if attempt:
                 raise
@@ -600,13 +614,13 @@ def work(channel: str, thread_ts: str, requests: list) -> None:
         resumed = state.pop("resumed", False)
         state["streaming"] = bool(live)  # its stream messages must not end the run (see on_message)
 
-    def reply(text: str, ok: bool = True) -> None:
+    def reply(text: str, ok: bool = True, footer: str = "") -> None:
         stop_status()
         if live:
             live.close(ok)
         with lock:
             state["final"] = True
-        post(channel, thread_ts, text)
+        post(channel, thread_ts, text, footer)
         with lock:
             if busy.get(thread_ts) is state:
                 state["answered"] = True  # a restart before the reply_done event must not rerun it
@@ -623,10 +637,10 @@ def work(channel: str, thread_ts: str, requests: list) -> None:
         try:
             if live:
                 live.start()
-            answer = run_session(channel, thread_ts, requests, key, resumed, live and live.on_event)
+            answer, model = run_session(channel, thread_ts, requests, key, resumed, live and live.on_event)
         finally:
             run_slots.release()
-        reply(answer or f"{requesters} the Claude session ended without an answer.")
+        reply(answer or f"{requesters} the Claude session ended without an answer.", footer=footer(model))
     except claude_cli.Stopped:
         with lock:
             who = (busy.get(thread_ts) or {}).get("stopped_by")
