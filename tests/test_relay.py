@@ -32,7 +32,8 @@ class RelayTest(unittest.TestCase):
         self.client.conversations_replies.return_value = {"messages": []}
         patcher = mock.patch.multiple(
             self.r.config, ALLOWED_USERS={ALICE, BOB}, ALERT_CHANNEL=ALERTS, ALERT_BOT_USER=SENTRY,
-            ALERT_ROUTINE_URL="https://example.test/fire", CLAUDE_APP_USER=CLAUDE_TAG, STREAM=False)
+            ALERT_ROUTINE_URL="https://example.test/fire", CLAUDE_APP_USER=CLAUDE_TAG, STREAM=False,
+            STEP_MESSAGE=False)
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -587,6 +588,13 @@ class RunsFileTest(RelayTest):
         self.assertTrue(self.r.busy["1.0"]["resumed"])
         self.assertEqual(list(self.saved()), ["1.0"])
 
+    def test_restart_deletes_the_cut_off_runs_step_message(self):
+        self.r.RUNS_FILE.write_text(json.dumps({
+            "1.0": {"since": time.time(), "channel": "C1", "requests": [["1.0", ALICE]], "pending": [],
+                    "step_ts": "1.5"}}))
+        self.r.resume_runs()
+        self.client.chat_delete.assert_called_once_with(channel="C1", ts="1.5")
+
     def test_resumed_run_is_told_it_was_cut_off(self):
         self.client.conversations_replies.return_value = {"messages": [{"ts": "1.0", "user": ALICE, "text": "hi"}]}
         with mock.patch.object(self.r.claude_cli, "get", return_value={}):
@@ -825,3 +833,50 @@ class StreamingRunTest(RelayTest):
                 + self.client.chat_stopStream.call_args_list for c in call.kwargs.get("chunks", [])]
         self.assertEqual(sent[-1], {"type": "task_update", "id": "t1", "title": "Read relay.py", "status": "error"})
         self.client.chat_delete.assert_not_called()  # a failed run keeps its steps
+
+
+class StepMessageRunTest(RelayTest):
+    def setUp(self):
+        super().setUp()
+        mock.patch.multiple(self.r.config, STEP_MESSAGE=True, STATUS="").start()
+        mock.patch.object(self.r.progress, "STEP_UPDATE_SECONDS", 0.01).start()
+        self.addCleanup(mock.patch.stopall)
+        self.r._custom_emoji.update(at=time.time(), names=["claudino-read"])
+        self.r.busy["1.0"] = {"since": time.time(), "channel": "C1", "requests": [("1.0", ALICE)], "pending": []}
+        self.addCleanup(self.r.busy.clear)
+        self.order = []
+        self.client.chat_postMessage.side_effect = (
+            lambda **kw: self.order.append(("post", kw["text"])) or {"ts": "1.5"})
+        self.client.chat_update.side_effect = lambda **kw: self.order.append(("update", kw["text"]))
+        self.client.chat_delete.side_effect = lambda **kw: self.order.append(("delete", kw["ts"]))
+
+    def test_steps_show_in_one_message_deleted_after_the_answer(self):
+        def run(key, prompt, on_event):
+            for event_id, name, args in (("t1", "Read", {"file_path": "/repo/in.pdf"}),
+                                         ("t2", "Grep", {"pattern": "dedupe"})):
+                on_event({"type": "assistant", "message": {"content": [
+                    {"type": "tool_use", "id": event_id, "name": name, "input": args}]}})
+                for _ in range(200):
+                    if len(self.order) == (1 if event_id == "t1" else 2):
+                        break
+                    time.sleep(0.01)
+            return "done!", False, "claude-opus-5-5"
+        with mock.patch.object(self.r, "thread_prompt", return_value=("prompt", "3.0")), \
+                mock.patch.object(self.r.claude_cli, "run", side_effect=run), \
+                mock.patch.object(self.r.claude_cli, "update"):
+            self.r.work("C1", "1.0", [("1.0", ALICE)])
+        self.assertEqual(self.order[:2], [("post", ":claudino-read: Read in.pdf"), ("update", ":mag: Search for `dedupe`")])
+        self.assertEqual(self.order[2][0], "post")  # the answer
+        self.assertEqual(self.order[3:], [("delete", "1.5")])
+        self.assertNotIn("step_ts", self.r.busy.get("1.0", {}))
+
+    def test_step_message_does_not_end_the_run(self):
+        self.r.busy["1.0"]["streaming"] = True
+        with mock.patch.object(self.r, "reply_done") as reply_done:
+            self.r.on_message({"channel": "C1", "user": RELAY_USER_ID, "ts": "1.5", "thread_ts": "1.0"})
+        reply_done.assert_not_called()
+
+    def test_custom_emoji_when_the_workspace_has_it(self):
+        self.assertEqual(self.r.step_emoji("read"), "claudino-read")
+        self.assertEqual(self.r.step_emoji("web"), "globe_with_meridians")
+

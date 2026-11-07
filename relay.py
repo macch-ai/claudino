@@ -77,7 +77,7 @@ def thread_messages(channel: str, thread_ts: str) -> list:
 
 def save_runs() -> None:
     """Mirror busy to disk. Call with lock held."""
-    data = {thread_ts: {key: state.get(key) for key in ("since", "channel", "requests", "pending", "answered")}
+    data = {thread_ts: {key: state.get(key) for key in ("since", "channel", "requests", "pending", "answered", "step_ts")}
             for thread_ts, state in busy.items()}
     RUNS_FILE.parent.mkdir(parents=True, exist_ok=True)
     tmp = RUNS_FILE.with_suffix(".tmp")
@@ -97,6 +97,8 @@ def resume_runs() -> None:
     for thread_ts, state in saved.items():
         requests = [] if state.get("answered") else [tuple(r) for r in state.get("requests") or []]
         requests += [tuple(r) for r in state.get("pending") or []]
+        if state.get("step_ts"):  # the cut-off run's step message would stay forever
+            progress.delete_message(app.client, state["channel"], state["step_ts"], thread_ts)
         if not requests:
             continue
         if time.time() - state["since"] > BUSY_TIMEOUT_SECONDS:
@@ -283,6 +285,17 @@ def pick_loading_messages(text: str) -> list | None:
 loading_messages = {}  # thread_ts -> status lines Haiku wrote for the thread's latest request
 status_wake = {}  # thread_ts -> Event that makes a running status refresher update right away
 step_lines = {}  # thread_ts -> Claude's latest steps in the running run, newest first
+
+
+STEP_EMOJI_FALLBACK = {"read": "page_facing_up", "search": "mag", "run": "computer", "edit": "pencil2",
+                       "web": "globe_with_meridians", "delegate": "busts_in_silhouette", "tool": "gear"}
+
+
+def step_emoji(kind: str) -> str:
+    """claudino's animated emoji for the kind of step (scripts/make-step-emoji.py), or a standard one
+    when the workspace does not have it."""
+    name = f"claudino-{kind}"
+    return name if name in custom_emoji() else STEP_EMOJI_FALLBACK.get(kind, "gear")
 
 
 def show_step(thread_ts: str, event: dict) -> None:
@@ -631,7 +644,15 @@ def work(channel: str, thread_ts: str, requests: list) -> None:
     with lock:
         state = busy.get(thread_ts) or {}
         resumed = state.pop("resumed", False)
-        state["streaming"] = bool(live)  # its stream messages must not end the run (see on_message)
+
+    def step_posted(ts: str) -> None:
+        with lock:
+            state["step_ts"] = ts
+            if busy.get(thread_ts) is state:
+                save_runs()
+    step = progress.StepMessage(app.client, channel, thread_ts, step_emoji, step_posted) if config.STEP_MESSAGE else None
+    with lock:
+        state["streaming"] = bool(live or step)  # its progress messages must not end the run (see on_message)
 
     def reply(text: str, ok: bool = True, footer: str = "") -> None:
         stop_status()
@@ -640,6 +661,10 @@ def work(channel: str, thread_ts: str, requests: list) -> None:
         with lock:
             state["final"] = True
         posted = post(channel, thread_ts, text, footer)
+        if step:
+            step.finish()  # after the answer, so the thread never looks empty
+            with lock:
+                state.pop("step_ts", None)
         if live and ok and posted and not config.KEEP_PROGRESS:
             live.delete()  # the answer is in: the steps that led to it only clutter the thread
         with lock:
@@ -658,9 +683,13 @@ def work(channel: str, thread_ts: str, requests: list) -> None:
         try:
             if live:
                 live.start()
+            if step:
+                step.start()
 
             def on_event(event: dict) -> None:
                 show_step(thread_ts, event)
+                if step:
+                    step.on_event(event)
                 if live:
                     live.on_event(event)
             answer, model = run_session(channel, thread_ts, requests, key, resumed, on_event)
