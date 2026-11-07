@@ -31,3 +31,13 @@ its resting text. Reset the thread when done (`agents.sessions.setStatus ... sta
   settings. No reinstall was needed: `chat:write` was already granted.
 - Claude Code's Bash tool runs each command in its own process group. Kill the whole process
   tree, not the group, and make test fakes `setsid` the same way.
+
+## Answer cards
+
+- Answers can carry `data_table` and `data_visualization` blocks (2026 Block Kit). Slack allows at
+  most 2 charts per message and 20,000 characters across a message's table cells; `cards.py` checks
+  both. A post Slack refuses with blocks is sent again as text only.
+- Reply buttons arrive as `block_actions` over Socket Mode once **Interactivity** is on. The click
+  replaces the button row with "<@user> picked *label*" (`chat.update`), so a reply is sent once.
+- Probe a card before merging a change to `cards.py`:
+  `scripts/slack-probe.py chat.postMessage channel=C123 thread_ts=1700000000.000100 text=probe blocks='[...]'`.
