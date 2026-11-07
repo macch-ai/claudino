@@ -380,6 +380,9 @@ class StatusTest(RelayTest):
                                       EFFORT="medium")
         patcher.start()
         self.addCleanup(patcher.stop)
+        throttle = mock.patch.object(self.r, "STATUS_MIN_SECONDS", 0)
+        throttle.start()
+        self.addCleanup(throttle.stop)
         self.r.loading_messages.clear()
         self.r.status_wake.clear()
         self.calls = []
@@ -421,6 +424,35 @@ class StatusTest(RelayTest):
             self.wait_for(lambda: len(self.calls) == 2)
             stop()
         self.assertEqual([c[2] for c in self.calls], [["Warming up"], ["Reading the thread", "Fixing it"]])
+
+    def test_claudes_steps_replace_the_lines_newest_first(self):
+        def step(id_, name, **args):
+            return {"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": id_, "name": name, "input": args}]}}
+
+        def run(key, prompt, on_event):
+            self.wait_for(lambda: self.calls)
+            for event in (step("t1", "Read", file_path="/repo/in.pdf"), step("t2", "TodoWrite"),
+                          step("t3", "Bash", description="Run the tests"), step("t4", "Grep", pattern="dedupe"),
+                          step("t5", "Bash", description="Check CI")):
+                on_event(event)
+            self.wait_for(lambda: self.calls[-1][2][0] == "Check CI")
+            return "done!", False, "claude-opus-5-5"
+        self.work(run)
+        self.assertEqual(self.calls[-3][2], ["Check CI", "Search for dedupe", "Run the tests"])
+        self.assertNotIn("1.0", self.r.step_lines)
+
+    def test_steps_wait_for_the_minimum_gap_between_updates(self):
+        with mock.patch.object(self.r, "STATUS_MIN_SECONDS", 0.3):
+            stop = self.r.show_working("C1", "1.0")
+            self.wait_for(lambda: self.calls)
+            self.r.show_step("1.0", {"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": "t1", "name": "Read", "input": {"file_path": "a.py"}}]}})
+            time.sleep(0.1)
+            self.assertEqual(len(self.calls), 1)
+            self.wait_for(lambda: len(self.calls) == 2)
+            stop()
+        self.assertEqual(self.calls[1][2], ["Read a.py"])
 
     def test_lines_ready_after_the_answer_do_not_bring_the_status_back(self):
         self.work()

@@ -55,8 +55,9 @@ PROMPT_SUFFIX = _str("CLAUDINO_PROMPT_SUFFIX")  # appended to every relayed requ
 # each request; LOADING_MESSAGES ("|" separated) show until they are ready. CLAUDINO_STATUS=off hides it.
 STATUS = "" if _str("CLAUDINO_STATUS").lower() == "off" else _str("CLAUDINO_STATUS", "is working on it...")
 LOADING_MESSAGES = [part.strip() for part in _str("CLAUDINO_LOADING_MESSAGES").split("|") if part.strip()][:10] or None
-# Stream each run's tool calls and narration into the thread as Slack task cards; "off" hides them.
-STREAM = _str("CLAUDINO_STREAM", "on").lower() != "off"
+# Stream each run's tool calls and narration into the thread as Slack task cards ("on"). Off by default:
+# the shimmer status shows Claude's latest steps instead.
+STREAM = _str("CLAUDINO_STREAM", "off").lower() == "on"
 # The progress messages are deleted once the answer is posted, unless this is "on". Failed or stopped
 # runs keep them either way: they show how far the run got.
 KEEP_PROGRESS = _str("CLAUDINO_KEEP_PROGRESS", "off").lower() == "on"
