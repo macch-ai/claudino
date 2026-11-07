@@ -13,6 +13,7 @@
 - **Native cards.** Answers can end with tables, charts (bar, line, area, pie), key-value fields and buttons, rendered as Slack Block Kit (`data_table`, `data_visualization`). A reply button sends its follow-up to the session as the clicker's request. Claude writes a small JSON spec ([`cards.py`](cards.py)); a spec that does not check out is left out and the text is posted alone. Buttons need **Interactivity** turned on in the Slack app settings (the manifest does it).
 - **Files and forwards.** Images, files and forwarded messages in the thread are downloaded and handed to the session. A forwarded message that belongs to a thread brings that whole thread along, and its new replies on every later turn (claudino must be in its channel).
 - **Instant feedback.** Every request gets an emoji reaction picked by Claude Haiku, with `:eyes:` as fallback, and the thread shows a loading status with rotating lines Haiku writes for that request until the answer lands. This needs **Agents** > **Agent experience** turned on in the Slack app settings (the manifest does it).
+- **Live progress.** While a run works, its tool calls stream into the thread as Slack task cards (in progress, done, failed), with the text Claude writes between them, through `chat.startStream`. Slack ends a stream after 10 minutes, so long runs continue in a new progress message. The answer still arrives as its own message. `CLAUDINO_STREAM=off` turns it off.
 - **Sentry alerts (optional).** New top-level Sentry alerts in a channel fire a [Claude Code routine](https://docs.claude.com/en/docs/claude-code) that investigates and replies in the alert thread.
 - **Stop (not shown yet).** Slack shows a stop button only on agent-session statuses (`agents.sessions.setStatus`), and those hide the rotating loading lines, so claudino keeps the lines and Slack says "Stop isn't available". The handler is ready: an `agent_session_stopped` event from an allowed user kills the run and its tools and drops queued requests.
 - **Allowlist.** Only the Slack users you list can start runs.
@@ -25,6 +26,7 @@ It is ~600 lines of Python with two dependencies (`slack_bolt`, `slack_sdk`).
 flowchart LR
     S[Slack] -- Socket Mode events --> R[relay.py]
     R -- "claude -p --resume (one session per thread)" --> C[Claude Code on your server]
+    C -- stream-json: tool calls --> R -- "chat.startStream / appendStream (task cards)" --> S
     C -- final answer --> R -- chat.postMessage --> S
     R -- new Sentry alert --> F[fire_claude.py] -- POST /fire --> RT[Claude Code routine]
 ```
@@ -33,6 +35,7 @@ flowchart LR
 | --- | --- |
 | [`relay.py`](relay.py) | Slack Socket Mode app: routing, allowlist, queue, reactions, files, posting answers |
 | [`cards.py`](cards.py) | Checks an answer's card spec and turns it into Block Kit |
+| [`progress.py`](progress.py) | Streams a run's tool calls into the thread as Slack task cards |
 | [`claude_cli.py`](claude_cli.py) | Runs `claude -p` per thread and remembers each thread's session |
 | [`config.py`](config.py) | Every setting, read from the environment |
 | [`claudino_instructions.md`](claudino_instructions.md) | System prompt appended to every session |
@@ -82,6 +85,7 @@ All settings live in `~/.config/claude-relay/env`. [`.env.example`](.env.example
 | `CLAUDINO_PROMPT_SUFFIX` | empty | Text appended to every relayed request |
 | `CLAUDINO_STATUS` | `is working on it...` | Loading status shown in the thread while a run works; `off` hides it |
 | `CLAUDINO_LOADING_MESSAGES` | empty | Fallback loading lines, separated by `\|` (max 10), shown until Haiku's lines for the request are ready or when it fails |
+| `CLAUDINO_STREAM` | `on` | Stream each run's tool calls into the thread as task cards; `off` hides them |
 | `CLAUDINO_TIMEOUT_SECONDS` | `3000` | Kill a run after this long |
 | `CLAUDINO_MAX_RUNS` | `3` | Claude runs working at once; other threads wait for a free slot |
 | `CLAUDINO_FILES_KEEP_DAYS` | `14` | Delete files downloaded from Slack after this many days; `0` keeps them |

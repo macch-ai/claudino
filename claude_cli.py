@@ -1,6 +1,7 @@
 """Run Claude Code headless: one resumable session per Slack thread."""
 
 import json
+import logging
 import os
 import signal
 import subprocess
@@ -16,6 +17,7 @@ INSTRUCTIONS_FILE = Path(__file__).with_name("claudino_instructions.md")
 # every command line to the journal and auth.log, and Slack threads do not belong there.
 SYSTEM_PROMPT_FILE = config.STATE_DIR / "system-prompt.md"
 
+log = logging.getLogger("claude-relay")
 _lock = threading.Lock()
 _runs_lock = threading.Lock()
 _running = {}  # key -> the thread's running claude process
@@ -134,8 +136,10 @@ def clear_stop(key: str) -> None:
         _stopped.discard(key)
 
 
-def _claude(prompt: str, session_id: str | None, key: str = "", new: bool = False) -> dict:
-    cmd = ["claude", "-p", "--output-format", "json", *permission_args(),
+def _claude(prompt: str, session_id: str | None, key: str = "", new: bool = False, on_event=None) -> dict:
+    """Run claude and return its result event. Every other event of its stream-json output goes to
+    on_event as it arrives (assistant turns, tool results), so the relay can show the work live."""
+    cmd = ["claude", "-p", "--output-format", "stream-json", "--verbose", *permission_args(),
            "--append-system-prompt-file", instructions_file()]
     if session_id:
         cmd += ["--session-id" if new else "--resume", session_id]
@@ -147,27 +151,58 @@ def _claude(prompt: str, session_id: str | None, key: str = "", new: bool = Fals
         proc = subprocess.Popen(cmd, cwd=cwd, env=_env(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, start_new_session=True)
         _running[key] = proc
-    try:
-        stdout, stderr = proc.communicate(config.with_suffix(prompt), timeout=config.TIMEOUT_SECONDS)
-    except subprocess.TimeoutExpired:
+    timed_out = threading.Event()
+
+    def time_out() -> None:
+        timed_out.set()
         _kill(proc)
-        proc.communicate()
-        raise
+
+    timer = threading.Timer(config.TIMEOUT_SECONDS, time_out)
+    timer.daemon = True
+    stderr = []
+    reader = threading.Thread(target=lambda: stderr.extend(proc.stderr), daemon=True)
+    result, last = None, ""
+    try:
+        timer.start()
+        reader.start()
+        try:
+            proc.stdin.write(config.with_suffix(prompt))
+            proc.stdin.close()
+        except BrokenPipeError:
+            pass
+        for line in proc.stdout:
+            last = line or last
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if event.get("type") == "result":
+                result = event
+            elif on_event:
+                try:
+                    on_event(event)
+                except Exception as error:  # showing progress must never break the run
+                    log.warning("progress for %s failed: %s", key, error)
+        proc.wait()
+        reader.join(timeout=5)
     finally:
+        timer.cancel()
         with _runs_lock:
             _running.pop(key, None)
             stopped = key in _stopped
             _stopped.discard(key)
     if stopped:
         raise Stopped()
-    try:
-        return json.loads(stdout)
-    except json.JSONDecodeError:
-        raise RuntimeError(f"claude exited {proc.returncode}: {(stderr or stdout)[-500:]}")
+    if timed_out.is_set():
+        raise subprocess.TimeoutExpired(cmd, config.TIMEOUT_SECONDS)
+    if result is None:
+        raise RuntimeError(f"claude exited {proc.returncode}: {(''.join(stderr) or last)[-500:]}")
+    return result
 
 
-def run(key: str, prompt: str) -> tuple[str, bool]:
+def run(key: str, prompt: str, on_event=None) -> tuple[str, bool]:
     """Send prompt to the thread's session, resuming it when there is one. Returns (answer, is_error).
+    on_event gets the run's stream-json events as they arrive.
     Raises Stopped when a user stops the run; the thread keeps its session.
     A new session's ID is saved before it starts, so a run a restart cuts off can be resumed."""
     session_id = get(key).get("session_id")
@@ -176,7 +211,7 @@ def run(key: str, prompt: str) -> tuple[str, bool]:
         session_id = str(uuid.uuid4())
         update(key, session_id=session_id)
     try:
-        data = _claude(prompt, session_id, key, new)
+        data = _claude(prompt, session_id, key, new, on_event)
     except RuntimeError:
         update(key, session_id=None, seen_ts="0")
         raise
