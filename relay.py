@@ -31,6 +31,7 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk.errors import SlackApiError
 
+import cards
 import claude_cli
 import config
 import fire_claude
@@ -317,20 +318,24 @@ def ack(channel: str, ts: str, text: str = "") -> None:
 
 def dispatch(message: dict) -> None:
     channel, ts, user = message["channel"], message["ts"], message["user"]
-    thread_ts = message.get("thread_ts") or ts
     ack(channel, ts, message.get("text") or "")
+    request(channel, message.get("thread_ts") or ts, ts, user, message.get("text") or "")
+
+
+def request(channel: str, thread_ts: str, ts: str, user: str, text: str) -> None:
+    """Start a run for the request, or queue it behind the thread's running one."""
     with lock:
         state = busy.get(thread_ts)
         if state and time.time() - state["since"] < BUSY_TIMEOUT_SECONDS:
             state["pending"].append((ts, user))
             save_runs()
             log.info("queued %s: a run for thread %s is still working", ts, thread_ts)
-            update_loading(thread_ts, message.get("text") or "")
+            update_loading(thread_ts, text)
             return
         busy[thread_ts] = {"since": time.time(), "channel": channel, "requests": [(ts, user)], "pending": []}
         save_runs()
         loading_messages.pop(thread_ts, None)  # the last run's lines are about an older request
-    update_loading(thread_ts, message.get("text") or "")
+    update_loading(thread_ts, text)
     start(channel, thread_ts, [(ts, user)])
 
 
@@ -481,12 +486,16 @@ def thread_prompt(channel: str, thread_ts: str, requests: list, key: str, resume
             lines.append(f"[{m['ts']}] {author}: " + untrusted(render(m, fence=False), f"{author}, not on the allowlist"))
     if not fresh:
         lines += forwarded_updates(messages, seen_ts)
+    clicks = [c for c in claude_cli.get(key).get("clicks") or [] if float(c["ts"]) > float(seen_ts)]
+    for c in clicks:
+        lines.append(f"[{c['ts']}] <@{c['user']}> clicked the button \"{c['label']}\" on your message "
+                     f"{c['message_ts']}, which sends you: {c['reply']}")
     requesters = " ".join(sorted({f"<@{user}>" for _, user in requests}))
     header = (f"Slack channel {channel}, thread {thread_ts}. Requesters: {requesters}. "
               f"Requests: the messages with ts {', '.join(ts for ts, _ in requests)}.\n"
               + (RESUMED_NOTE if resumed else "")
               + ("Thread so far:\n" if fresh else "New messages in the thread since your last answer:\n"))
-    last_seen = max([m["ts"] for m in messages] + [seen_ts], key=float)
+    last_seen = max([m["ts"] for m in messages] + [c["ts"] for c in clicks] + [seen_ts], key=float)
     return header + "\n".join(lines), last_seen
 
 
@@ -531,9 +540,31 @@ def show_working(channel: str, thread_ts: str):
     return stop
 
 
-def post(channel: str, thread_ts: str, text: str) -> None:
+def answer_message(answer: str) -> tuple[str, list | None]:
+    """The text and Block Kit blocks to post for an answer. An answer without a card, or with one
+    that is not valid, is posted as text alone (with a note on what was wrong with the card)."""
     try:
-        app.client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=text[:39000], unfurl_links=False)
+        text, spec = cards.split(answer)
+        if not spec:
+            return text, None
+        return "\n".join(p for p in (text, cards.summary(spec)) if p), cards.blocks(text, spec)
+    except cards.CardError as error:
+        log.warning("card left out: %s", error)
+        text = cards.CARD_FENCE.sub("", answer.rstrip()).rstrip()
+        return f"{text}\n_(card left out: {error})_", None
+
+
+def post(channel: str, thread_ts: str, text: str) -> None:
+    text, blocks = answer_message(text)
+    try:
+        try:
+            app.client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=text[:39000], blocks=blocks,
+                                        unfurl_links=False)
+        except SlackApiError as error:
+            if not blocks:
+                raise
+            log.warning("blocks refused in %s (%s): posting text only", thread_ts, error.response.get("error"))
+            app.client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=text[:39000], unfurl_links=False)
     except SlackApiError as error:
         log.error("post in %s failed: %s", thread_ts, error.response.get("error"))
         reply_done(thread_ts)
@@ -658,6 +689,46 @@ def on_session_stopped(event: dict) -> None:
 @app.event("reaction_added")
 def on_reaction(event: dict) -> None:
     """Acknowledge the event so Bolt does not log it as unhandled."""
+
+
+def picked(blocks: list, action_id: str, user: str, label: str) -> list:
+    """The message's blocks with the clicked button's row replaced by who picked what."""
+    note = {"type": "context", "elements": [{"type": "mrkdwn", "text": f"<@{user}> picked *{label}*"}]}
+    return [note if b.get("type") == "actions" and any(e.get("action_id") == action_id for e in b.get("elements") or [])
+            else b for b in blocks]
+
+
+@app.action(re.compile(f"^{cards.REPLY_ACTION}_"))
+def on_reply_button(ack, body: dict) -> None:
+    """A teammate clicked a reply button on a card: send its reply to the thread's session as their request.
+    The buttons give way to a note, so nobody sends the same reply twice."""
+    ack()
+    user, action = body["user"]["id"], body["actions"][0]
+    if user not in config.ALLOWED_USERS:
+        log.info("ignore button in %s from %s: not allowed", body.get("container", {}).get("message_ts"), user)
+        return
+    channel, message = body["channel"]["id"], body["message"]
+    thread_ts = message.get("thread_ts") or message["ts"]
+    label, reply, ts = action["text"]["text"], action["value"], action["action_ts"]
+    try:
+        app.client.chat_update(channel=channel, ts=message["ts"], text=message.get("text") or label,
+                               blocks=picked(message.get("blocks") or [], action["action_id"], user, label))
+    except SlackApiError as error:
+        log.warning("update after a click in %s failed: %s", thread_ts, error.response.get("error"))
+    key = f"{channel}:{thread_ts}"
+    seen = float(claude_cli.get(key).get("seen_ts") or 0)
+    clicks = [c for c in claude_cli.get(key).get("clicks") or [] if float(c["ts"]) > seen]
+    claude_cli.update(key, clicks=clicks + [{"ts": ts, "user": user, "label": label, "reply": reply,
+                                             "message_ts": message["ts"]}])
+    log.info("button %r in %s from %s", label, thread_ts, user)
+    active_threads.add((channel, thread_ts))
+    request(channel, thread_ts, ts, user, reply)
+
+
+@app.action(re.compile(f"^{cards.LINK_ACTION}_"))
+def on_link_button(ack) -> None:
+    """Slack opens link buttons itself but still sends the click: acknowledge it."""
+    ack()
 
 
 def remember(ts: str) -> None:

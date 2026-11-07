@@ -25,6 +25,9 @@ oauth_config:
       - reactions:read
       - reactions:write
 settings:
+  # Reply buttons on answer cards: clicks reach claudino over Socket Mode (block_actions).
+  interactivity:
+    is_enabled: true
   event_subscriptions:
     bot_events:
       # Stops a run when someone clicks stop. Slack only shows the button on agents.sessions.setStatus

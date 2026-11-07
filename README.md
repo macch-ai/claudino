@@ -10,6 +10,7 @@
 - **No mention needed once it's in.** After claudino takes part in a thread, teammates' replies reach it unless they mention someone else.
 - **Never duplicates work.** Messages sent while a run is working are queued and handled together by the next run.
 - **Survives restarts.** Runs a restart cuts off (every deploy restarts claudino) resume in the same Claude session, with their queued requests.
+- **Native cards.** Answers can end with tables, charts (bar, line, area, pie), key-value fields and buttons, rendered as Slack Block Kit (`data_table`, `data_visualization`). A reply button sends its follow-up to the session as the clicker's request. Claude writes a small JSON spec ([`cards.py`](cards.py)); a spec that does not check out is left out and the text is posted alone. Buttons need **Interactivity** turned on in the Slack app settings (the manifest does it).
 - **Files and forwards.** Images, files and forwarded messages in the thread are downloaded and handed to the session. A forwarded message that belongs to a thread brings that whole thread along, and its new replies on every later turn (claudino must be in its channel).
 - **Instant feedback.** Every request gets an emoji reaction picked by Claude Haiku, with `:eyes:` as fallback, and the thread shows a loading status with rotating lines Haiku writes for that request until the answer lands. This needs **Agents** > **Agent experience** turned on in the Slack app settings (the manifest does it).
 - **Sentry alerts (optional).** New top-level Sentry alerts in a channel fire a [Claude Code routine](https://docs.claude.com/en/docs/claude-code) that investigates and replies in the alert thread.
@@ -31,6 +32,7 @@ flowchart LR
 | File | Role |
 | --- | --- |
 | [`relay.py`](relay.py) | Slack Socket Mode app: routing, allowlist, queue, reactions, files, posting answers |
+| [`cards.py`](cards.py) | Checks an answer's card spec and turns it into Block Kit |
 | [`claude_cli.py`](claude_cli.py) | Runs `claude -p` per thread and remembers each thread's session |
 | [`config.py`](config.py) | Every setting, read from the environment |
 | [`claudino_instructions.md`](claudino_instructions.md) | System prompt appended to every session |
