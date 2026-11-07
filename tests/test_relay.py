@@ -715,7 +715,7 @@ class ReplyButtonTest(RelayTest):
 class StreamingRunTest(RelayTest):
     def setUp(self):
         super().setUp()
-        mock.patch.multiple(self.r.config, STREAM=True, STATUS="").start()
+        mock.patch.multiple(self.r.config, STREAM=True, STATUS="", KEEP_PROGRESS=False).start()
         mock.patch.object(self.r.progress, "FLUSH_SECONDS", 0.01).start()
         self.addCleanup(mock.patch.stopall)
         self.client.chat_startStream.return_value = {"ts": "5.0"}
@@ -724,6 +724,7 @@ class StreamingRunTest(RelayTest):
         self.order = []
         self.client.chat_stopStream.side_effect = lambda **kw: self.order.append("stop")
         self.client.chat_postMessage.side_effect = lambda **kw: self.order.append("post")
+        self.client.chat_delete.side_effect = lambda **kw: self.order.append(("delete", kw["ts"]))
 
     def wait_for_stream(self):
         for _ in range(500):
@@ -753,7 +754,24 @@ class StreamingRunTest(RelayTest):
                   + [self.client.chat_stopStream.call_args] for c in call.kwargs.get("chunks", [])]
         self.assertEqual(chunks[0], {"type": "markdown_text", "text": "Checking CI\n\n"})
         self.assertEqual(chunks[-1], {"type": "task_update", "id": "t1", "title": "Run `gh pr checks 12`", "status": "complete"})
-        self.assertEqual(self.order, ["stop", "post"])
+        self.assertEqual(self.order, ["stop", "post", ("delete", "5.0")])
+
+    def quick_run(self, key, prompt, on_event):
+        on_event({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls"}}]}})
+        self.wait_for_stream()
+        return "done!", False, "claude-opus-5-5"
+
+    def test_keep_progress_keeps_the_steps(self):
+        with mock.patch.object(self.r.config, "KEEP_PROGRESS", True):
+            self.work(self.quick_run)
+        self.client.chat_delete.assert_not_called()
+
+    def test_steps_stay_when_the_answer_was_not_posted(self):
+        self.client.chat_postMessage.side_effect = SlackApiError("bad", {"error": "channel_not_found"})
+        with mock.patch.object(self.r, "reply_done"):
+            self.work(self.quick_run)
+        self.client.chat_delete.assert_not_called()
 
     def test_progress_messages_do_not_end_the_run(self):
         with mock.patch.object(self.r, "reply_done") as reply_done:
@@ -774,3 +792,4 @@ class StreamingRunTest(RelayTest):
         sent = [c for call in self.client.chat_startStream.call_args_list + self.client.chat_appendStream.call_args_list
                 + self.client.chat_stopStream.call_args_list for c in call.kwargs.get("chunks", [])]
         self.assertEqual(sent[-1], {"type": "task_update", "id": "t1", "title": "Read relay.py", "status": "error"})
+        self.client.chat_delete.assert_not_called()  # a failed run keeps its steps
