@@ -61,6 +61,9 @@ STREAM = _str("CLAUDINO_STREAM", "off").lower() == "on"
 # The progress messages are deleted once the answer is posted, unless this is "on". Failed or stopped
 # runs keep them either way: they show how far the run got.
 KEEP_PROGRESS = _str("CLAUDINO_KEEP_PROGRESS", "off").lower() == "on"
+# One thread message that shows Claude's current step with an animated emoji, deleted once the answer
+# is in. The desktop app hides status text, so this is how it shows the steps; "off" turns it off.
+STEP_MESSAGE = _str("CLAUDINO_STEP_MESSAGE", "on").lower() != "off"
 TIMEOUT_SECONDS = int(_str("CLAUDINO_TIMEOUT_SECONDS", str(50 * 60)))
 MAX_RUNS = max(1, int(_str("CLAUDINO_MAX_RUNS", "3")))  # Claude runs at once; more threads wait their turn
 FILES_KEEP_DAYS = int(_str("CLAUDINO_FILES_KEEP_DAYS", "14"))  # downloaded Slack files are deleted after this; 0 keeps them

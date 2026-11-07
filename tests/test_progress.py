@@ -131,6 +131,34 @@ class TitleTest(unittest.TestCase):
         self.assertEqual(progress.step_titles({**turn(tool("t1")), "parent_tool_use_id": "t0"}), [])
         self.assertEqual(progress.step_titles(result("t1")), [])
 
+    def test_steps_carry_their_kind(self):
+        self.assertEqual(progress.steps(turn(tool("t1", "Read", file_path="/a/b.py"), tool("t2", "Monitor", description="Wait for CI"),
+                                             tool("t3", "mcp__linear__get_issue"))),
+                         [("read", "Read b.py"), ("run", "Wait for CI"), ("tool", "linear: get issue")])
+
+    def test_step_message_posts_then_edits_and_finish_deletes(self):
+        client = mock.Mock()
+        client.chat_postMessage.return_value = {"ts": "9.0"}
+        posted = []
+        m = progress.StepMessage(client, "C1", "1.0", lambda kind: kind, posted.append)
+        m.flush()
+        client.chat_postMessage.assert_not_called()  # nothing to show before the first step
+        m.on_event(turn(tool("t1", "Read", file_path="/a/b.py")))
+        m.flush()
+        m.flush()  # same text: no call
+        m.on_event(turn(tool("t2", "Bash", description="Run tests")))
+        client.chat_update.side_effect = SlackApiError("slow down", {"error": "ratelimited"})
+        m.flush()
+        client.chat_update.side_effect = None
+        m.flush()
+        m.finish()
+        self.assertEqual(client.chat_postMessage.call_args.kwargs["text"], ":read: Read b.py")
+        self.assertEqual(posted, ["9.0"])
+        self.assertIn("9.0", progress.STREAM_MESSAGES)
+        self.assertEqual(client.chat_update.call_args.kwargs, {"channel": "C1", "ts": "9.0", "text": ":run: Run tests"})
+        self.assertEqual(client.chat_update.call_count, 2)
+        client.chat_delete.assert_called_once_with(channel="C1", ts="9.0")
+
     def test_titles(self):
         cases = [
             ("Bash", {"command": "pytest -q", "description": "Run the tests"}, "Run the tests"),

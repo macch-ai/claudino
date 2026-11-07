@@ -59,22 +59,33 @@ def task_title(name: str, args: dict) -> str:
     if name.startswith("mcp__"):
         server, _, tool = name[5:].partition("__")
         return short(f"{server}: {tool.replace('_', ' ')}")
-    return short(name)
+    return short(redact(args.get("description") or name))  # Monitor and other tools that describe themselves
 
 
 MAX_STEP_LINES = 3  # latest steps the shimmer status rotates through
 
 
-def step_titles(event: dict) -> list:
-    """Task titles of the tool calls in one stream-json event, for the shimmer status (plain text, so no
-    backticks). Subagent events and bookkeeping tools give none."""
+STEP_KINDS = {"Read": "read", "NotebookRead": "read", "Grep": "search", "Glob": "search", "WebSearch": "search",
+              "Bash": "run", "BashOutput": "run", "Monitor": "run", "Edit": "edit", "MultiEdit": "edit",
+              "Write": "edit", "NotebookEdit": "edit", "WebFetch": "web", "Task": "delegate", "Agent": "delegate"}
+
+
+def steps(event: dict) -> list:
+    """(kind, title) of each tool call in one stream-json event. Subagent events and bookkeeping
+    tools give none."""
     if event.get("type") != "assistant" or event.get("parent_tool_use_id"):
         return []
     content = (event.get("message") or {}).get("content")
     if not isinstance(content, list):
         return []
-    return [task_title(c.get("name", ""), c.get("input")).replace("`", "") for c in content
-            if c.get("type") == "tool_use" and c.get("name") not in HIDDEN_TOOLS]
+    return [(STEP_KINDS.get(c.get("name", ""), "tool"), task_title(c.get("name", ""), c.get("input")))
+            for c in content if c.get("type") == "tool_use" and c.get("name") not in HIDDEN_TOOLS]
+
+
+def step_titles(event: dict) -> list:
+    """Task titles of the tool calls in one stream-json event, for the shimmer status (plain text, so no
+    backticks)."""
+    return [title.replace("`", "") for _, title in steps(event)]
 
 
 STREAM_MESSAGES = set()  # ts of every progress message: their message events are not answers
@@ -220,3 +231,79 @@ class Progress:
             except SlackApiError as error:
                 log.warning("deleting progress %s in %s failed: %s", ts, self.thread_ts, error.response.get("error"))
         self.messages = []
+
+
+STEP_UPDATE_SECONDS = 2.5  # chat.update allows about 50 calls a minute per workspace, shared by every run
+
+
+class StepMessage:
+    """One message in the thread that shows Claude's current step, with an animated emoji for its kind.
+    It is posted on the first tool call, edited as the run goes and deleted once the answer is in. The
+    Slack desktop app replaces any status text with its own "is working" after a second, so this is
+    what shows the steps there. Feed it events with on_event(); finish() deletes it."""
+
+    def __init__(self, client, channel: str, thread_ts: str, emoji, on_post=None):
+        self.client, self.channel, self.thread_ts = client, channel, thread_ts
+        self.emoji = emoji  # kind -> emoji name
+        self.on_post = on_post  # called with the message ts once it is posted
+        self.lock = threading.Lock()
+        self.ts = None
+        self.latest = None  # text to show
+        self.shown = None  # text Slack shows
+        self.broken = False
+        self.done = threading.Event()
+        self.updater = None
+
+    def start(self) -> None:
+        self.updater = threading.Thread(target=self._loop, daemon=True)
+        self.updater.start()
+
+    def on_event(self, event: dict) -> None:
+        found = steps(event)
+        if found:
+            kind, title = found[-1]
+            with self.lock:
+                self.latest = f":{self.emoji(kind)}: {title}"
+
+    def _loop(self) -> None:
+        self.flush()
+        while not self.done.wait(STEP_UPDATE_SECONDS):
+            self.flush()
+
+    def flush(self) -> None:
+        with self.lock:
+            text = self.latest
+        if not text or text == self.shown or self.broken:
+            return
+        try:
+            if self.ts is None:
+                ts = self.client.chat_postMessage(channel=self.channel, thread_ts=self.thread_ts, text=text,
+                                                  unfurl_links=False)["ts"]
+                STREAM_MESSAGES.add(ts)
+                self.ts = ts
+                if self.on_post:
+                    self.on_post(ts)
+            else:
+                self.client.chat_update(channel=self.channel, ts=self.ts, text=text)
+            self.shown = text
+        except SlackApiError as error:
+            if error.response.get("error") == "ratelimited":
+                return  # the next tick tries again
+            log.warning("step message in %s failed: %s", self.thread_ts, error.response.get("error"))
+            self.broken = True
+
+    def finish(self) -> None:
+        """Stop updating and delete the message."""
+        self.done.set()
+        if self.updater and self.updater.is_alive():
+            self.updater.join(timeout=10)
+        if self.ts:
+            delete_message(self.client, self.channel, self.ts, self.thread_ts)
+            self.ts = None
+
+
+def delete_message(client, channel: str, ts: str, thread_ts: str) -> None:
+    try:
+        client.chat_delete(channel=channel, ts=ts)
+    except SlackApiError as error:
+        log.warning("deleting %s in %s failed: %s", ts, thread_ts, error.response.get("error"))

@@ -44,6 +44,14 @@ its resting text. Reset the thread when done (`agents.sessions.setStatus ... sta
 
 ## Live steps in the status
 
+- Probed 2026-11-07: the Slack **desktop app** shows any `assistant.threads.setStatus` text or
+  loading line for about a second, then its own "claudino is working". Slack web keeps ours. So the
+  steps also go to one thread message (`progress.StepMessage`): posted on the first tool call, edited
+  with `chat.update` at most every 2.5 s, deleted after the answer. A restart deletes a cut-off run's
+  message (`step_ts` in `runs.json`).
+- Its emoji come from `scripts/make-step-emoji.py` (`docs/emoji/claudino-<kind>.gif`, 128x128). Upload
+  them as custom emoji with those names; `relay.step_emoji` falls back to standard emoji until then.
+
 - With `CLAUDINO_STREAM` off (the default), each tool call's title goes to the shimmer status: its
   `loading_messages` become the latest 3 steps, newest first (`show_step`). Haiku's lines for the
   request show until the first step. The refresher sets the status at most every
