@@ -32,7 +32,7 @@ class RelayTest(unittest.TestCase):
         self.client.conversations_replies.return_value = {"messages": []}
         patcher = mock.patch.multiple(
             self.r.config, ALLOWED_USERS={ALICE, BOB}, ALERT_CHANNEL=ALERTS, ALERT_BOT_USER=SENTRY,
-            ALERT_ROUTINE_URL="https://example.test/fire", CLAUDE_APP_USER=CLAUDE_TAG)
+            ALERT_ROUTINE_URL="https://example.test/fire", CLAUDE_APP_USER=CLAUDE_TAG, STREAM=False)
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -362,12 +362,12 @@ class StatusTest(RelayTest):
 
     def work(self, run=None):
         with mock.patch.object(self.r, "thread_prompt", return_value=("prompt", "3.0")), \
-                mock.patch.object(self.r.claude_cli, "run", side_effect=run or (lambda key, prompt: ("done!", False))), \
+                mock.patch.object(self.r.claude_cli, "run", side_effect=run or (lambda key, prompt, on_event: ("done!", False))), \
                 mock.patch.object(self.r.claude_cli, "update"):
             self.r.work("C1", "1.0", [("1.0", ALICE)])
 
     def test_status_shows_while_working_and_stops_before_the_answer(self):
-        def run(key, prompt):
+        def run(key, prompt, on_event):
             self.wait_for(lambda: self.calls)
             return "done!", False
         self.work(run)
@@ -414,7 +414,7 @@ class StatusTest(RelayTest):
         self.r.busy["1.0"] = {"since": time.time(), "channel": "C1", "pending": [], "stopped_by": BOB}
         self.addCleanup(self.r.busy.clear)
 
-        def run(key, prompt):
+        def run(key, prompt, on_event):
             raise self.r.claude_cli.Stopped()
         self.work(run)
         self.assertEqual(self.calls[1:], [("post", f"Stopped by <@{BOB}>."), ("status", "", None)])
@@ -675,3 +675,67 @@ class ReplyButtonTest(RelayTest):
         prompt, last_seen = self.r.thread_prompt("C1", "1.0", [("7.5", ALICE)], "C1:1.0")
         self.assertIn(f'[7.5] <@{ALICE}> clicked the button "Merge it" on your message 6.0, which sends you: merge PR #12', prompt)
         self.assertEqual(last_seen, "7.5")
+
+
+class StreamingRunTest(RelayTest):
+    def setUp(self):
+        super().setUp()
+        mock.patch.multiple(self.r.config, STREAM=True, STATUS="").start()
+        mock.patch.object(self.r.progress, "FLUSH_SECONDS", 0.01).start()
+        self.addCleanup(mock.patch.stopall)
+        self.client.chat_startStream.return_value = {"ts": "5.0"}
+        self.r.busy["1.0"] = {"since": time.time(), "channel": "C1", "requests": [("1.0", ALICE)], "pending": []}
+        self.addCleanup(self.r.busy.clear)
+        self.order = []
+        self.client.chat_stopStream.side_effect = lambda **kw: self.order.append("stop")
+        self.client.chat_postMessage.side_effect = lambda **kw: self.order.append("post")
+
+    def wait_for_stream(self):
+        for _ in range(500):
+            if self.client.chat_startStream.called:
+                return
+            time.sleep(0.01)
+        self.fail("the stream never started")
+
+    def work(self, run):
+        with mock.patch.object(self.r, "thread_prompt", return_value=("prompt", "3.0")), \
+                mock.patch.object(self.r.claude_cli, "run", side_effect=run), \
+                mock.patch.object(self.r.claude_cli, "update"):
+            self.r.work("C1", "1.0", [("1.0", ALICE)])
+
+    def test_tool_calls_stream_and_the_stream_ends_before_the_answer(self):
+        def run(key, prompt, on_event):
+            on_event({"type": "assistant", "message": {"content": [
+                {"type": "text", "text": "Checking CI"},
+                {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "gh pr checks 12"}}]}})
+            self.wait_for_stream()
+            on_event({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1"}]}})
+            return "done!", False
+        self.work(run)
+        start = self.client.chat_startStream.call_args.kwargs
+        self.assertEqual((start["recipient_user_id"], start["thread_ts"]), (ALICE, "1.0"))
+        chunks = [c for call in [self.client.chat_startStream.call_args] + self.client.chat_appendStream.call_args_list
+                  + [self.client.chat_stopStream.call_args] for c in call.kwargs.get("chunks", [])]
+        self.assertEqual(chunks[0], {"type": "markdown_text", "text": "Checking CI\n\n"})
+        self.assertEqual(chunks[-1], {"type": "task_update", "id": "t1", "title": "Run `gh pr checks 12`", "status": "complete"})
+        self.assertEqual(self.order, ["stop", "post"])
+
+    def test_progress_messages_do_not_end_the_run(self):
+        with mock.patch.object(self.r, "reply_done") as reply_done:
+            self.r.busy["1.0"]["streaming"] = True
+            self.r.on_message({"channel": "C1", "user": RELAY_USER_ID, "ts": "5.0", "thread_ts": "1.0"})
+            reply_done.assert_not_called()
+            self.r.busy["1.0"]["final"] = True
+            self.r.on_message({"channel": "C1", "user": RELAY_USER_ID, "ts": "6.0", "thread_ts": "1.0"})
+            reply_done.assert_called_once_with("1.0")
+
+    def test_failed_run_marks_open_tasks_failed(self):
+        def run(key, prompt, on_event):
+            on_event({"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": "t1", "name": "Read", "input": {"file_path": "/repo/relay.py"}}]}})
+            self.wait_for_stream()
+            raise RuntimeError("boom")
+        self.work(run)
+        sent = [c for call in self.client.chat_startStream.call_args_list + self.client.chat_appendStream.call_args_list
+                + self.client.chat_stopStream.call_args_list for c in call.kwargs.get("chunks", [])]
+        self.assertEqual(sent[-1], {"type": "task_update", "id": "t1", "title": "Read relay.py", "status": "error"})

@@ -8,6 +8,8 @@
   together by one next run once claudino replies, so work is never duplicated.
 - Each request gets an emoji reaction as soon as it is seen, and the thread shows a
   loading status with rotating lines Haiku writes for the request until the answer is posted.
+- While a run works, its tool calls and the text Claude writes between them stream into the thread
+  as Slack task cards (progress.py); the answer is posted as its own message.
 - A stop from Slack (agent_session_stopped) kills the thread's run and drops its queue. Slack only
   shows the button on agents.sessions statuses, which hide the loading lines, so claudino does not use them.
 
@@ -35,6 +37,7 @@ import cards
 import claude_cli
 import config
 import fire_claude
+import progress
 
 MAX_CATCH_UP_SECONDS = 24 * 60 * 60  # never replay more than 1 day after an outage
 BUSY_TIMEOUT_SECONDS = 60 * 60  # a run that never replied stops blocking its thread
@@ -48,7 +51,7 @@ log = logging.getLogger("claude-relay")
 
 app = App(token=os.environ["SLACK_BOT_TOKEN"], ignoring_self_events_enabled=False)
 _me = app.client.auth_test()
-RELAY_USER_ID, RELAY_BOT_ID = _me["user_id"], _me.get("bot_id")
+RELAY_USER_ID, RELAY_BOT_ID, RELAY_TEAM_ID = _me["user_id"], _me.get("bot_id"), _me.get("team_id")
 
 lock = threading.Lock()
 busy = {}  # thread_ts -> {"since": float, "channel": str, "requests": [(ts, user)], "pending": [(ts, user)]}
@@ -570,7 +573,7 @@ def post(channel: str, thread_ts: str, text: str) -> None:
         reply_done(thread_ts)
 
 
-def run_session(channel: str, thread_ts: str, requests: list, key: str, resumed: bool) -> str:
+def run_session(channel: str, thread_ts: str, requests: list, key: str, resumed: bool, on_event=None) -> str:
     """Hand the thread's new messages to its Claude session; retry once with a new session."""
     for attempt in range(2):
         prompt, last_seen = thread_prompt(channel, thread_ts, requests, key, resumed)
@@ -579,7 +582,7 @@ def run_session(channel: str, thread_ts: str, requests: list, key: str, resumed:
                 busy[thread_ts]["seen_until"] = float(last_seen)
         try:
             started = time.time()
-            answer, is_error = claude_cli.run(key, prompt)
+            answer, is_error = claude_cli.run(key, prompt, on_event)
             claude_cli.update(key, seen_ts=last_seen)
             log.info("session %s answered in %.0fs (error=%s)", key, time.time() - started, is_error)
             return answer
@@ -591,12 +594,18 @@ def run_session(channel: str, thread_ts: str, requests: list, key: str, resumed:
 
 def work(channel: str, thread_ts: str, requests: list) -> None:
     stop_status = show_working(channel, thread_ts)
+    live = progress.Progress(app.client, channel, thread_ts, requests[0][1], RELAY_TEAM_ID) if config.STREAM else None
     with lock:
         state = busy.get(thread_ts) or {}
         resumed = state.pop("resumed", False)
+        state["streaming"] = bool(live)  # its stream messages must not end the run (see on_message)
 
-    def reply(text: str) -> None:
+    def reply(text: str, ok: bool = True) -> None:
         stop_status()
+        if live:
+            live.close(ok)
+        with lock:
+            state["final"] = True
         post(channel, thread_ts, text)
         with lock:
             if busy.get(thread_ts) is state:
@@ -612,7 +621,9 @@ def work(channel: str, thread_ts: str, requests: list) -> None:
             log.info("session %s waits: %d runs already working", key, config.MAX_RUNS)
             run_slots.acquire()
         try:
-            answer = run_session(channel, thread_ts, requests, key, resumed)
+            if live:
+                live.start()
+            answer = run_session(channel, thread_ts, requests, key, resumed, live and live.on_event)
         finally:
             run_slots.release()
         reply(answer or f"{requesters} the Claude session ended without an answer.")
@@ -620,10 +631,18 @@ def work(channel: str, thread_ts: str, requests: list) -> None:
         with lock:
             who = (busy.get(thread_ts) or {}).get("stopped_by")
         log.info("session %s stopped by %s", key, who)
-        reply(f"Stopped by <@{who}>." if who else "Stopped.")
+        reply(f"Stopped by <@{who}>." if who else "Stopped.", ok=False)
     except Exception as error:
         log.error("session %s failed: %s", key, error)
-        reply(f"{requesters} the Claude session failed: `{str(error)[:300]}`")
+        reply(f"{requesters} the Claude session failed: `{str(error)[:300]}`", ok=False)
+
+
+def streaming(thread_ts: str) -> bool:
+    """The thread's run is streaming its progress and has not posted its answer: claudino's messages
+    there are progress, not the answer that ends the run."""
+    with lock:
+        state = busy.get(thread_ts) or {}
+        return bool(state.get("streaming")) and not state.get("final")
 
 
 def reply_done(thread_ts: str) -> None:
@@ -651,7 +670,7 @@ def on_message(event: dict) -> None:
         hand_over(event["ts"])
         return
     if is_from_claudino(event):
-        if event.get("thread_ts"):
+        if event.get("thread_ts") and event.get("ts") not in progress.STREAM_MESSAGES and not streaming(event["thread_ts"]):
             reply_done(event["thread_ts"])
         return
     if event.get("subtype") or event.get("bot_id") or not event.get("user"):
