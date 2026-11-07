@@ -42,6 +42,7 @@ import progress
 MAX_CATCH_UP_SECONDS = 24 * 60 * 60  # never replay more than 1 day after an outage
 BUSY_TIMEOUT_SECONDS = 60 * 60  # a run that never replied stops blocking its thread
 STATUS_REFRESH_SECONDS = 90  # Slack clears a thread status after 2 minutes without a reply
+STATUS_MIN_SECONDS = 3  # at most one status update this often: tool calls can come several a second
 LAST_ALERT_FILE = config.STATE_DIR / "last_alert_ts"
 FILES_DIR = config.STATE_DIR / "files"
 RUNS_FILE = config.STATE_DIR / "runs.json"  # busy threads, so a restart can resume them
@@ -281,6 +282,18 @@ def pick_loading_messages(text: str) -> list | None:
 
 loading_messages = {}  # thread_ts -> status lines Haiku wrote for the thread's latest request
 status_wake = {}  # thread_ts -> Event that makes a running status refresher update right away
+step_lines = {}  # thread_ts -> Claude's latest steps in the running run, newest first
+
+
+def show_step(thread_ts: str, event: dict) -> None:
+    """Claude started tool calls: the shimmer status rotates through the latest ones."""
+    titles = progress.step_titles(event)
+    if not titles or not config.STATUS:
+        return
+    step_lines[thread_ts] = (titles[::-1] + step_lines.get(thread_ts, []))[:progress.MAX_STEP_LINES]
+    wake = status_wake.get(thread_ts)
+    if wake:
+        wake.set()
 
 
 def update_loading(thread_ts: str, text: str) -> None:
@@ -516,14 +529,17 @@ def set_status(channel: str, thread_ts: str, status: str, lines: list | None = N
 
 def show_working(channel: str, thread_ts: str):
     """Keep the working status up until the returned stop() is called (Slack drops it after 2 minutes).
-    New status lines from update_loading() show right away."""
+    It rotates through Claude's latest steps once there are some, Haiku's lines for the request until
+    then; new lines show within STATUS_MIN_SECONDS."""
     done, wake = threading.Event(), threading.Event()
+    step_lines.pop(thread_ts, None)
 
     def go() -> None:
         while not done.is_set():
-            lines = loading_messages.get(thread_ts) or config.LOADING_MESSAGES
+            lines = step_lines.get(thread_ts) or loading_messages.get(thread_ts) or config.LOADING_MESSAGES
             if not set_status(channel, thread_ts, config.STATUS, lines):
                 return
+            done.wait(STATUS_MIN_SECONDS)
             wake.wait(STATUS_REFRESH_SECONDS)
             wake.clear()
 
@@ -536,6 +552,7 @@ def show_working(channel: str, thread_ts: str):
             refresher.join(timeout=10)  # a status set after the reply would linger for 2 minutes
         if status_wake.get(thread_ts) is wake:
             status_wake.pop(thread_ts)
+            step_lines.pop(thread_ts, None)
 
     if config.STATUS:
         status_wake[thread_ts] = wake
@@ -641,7 +658,12 @@ def work(channel: str, thread_ts: str, requests: list) -> None:
         try:
             if live:
                 live.start()
-            answer, model = run_session(channel, thread_ts, requests, key, resumed, live and live.on_event)
+
+            def on_event(event: dict) -> None:
+                show_step(thread_ts, event)
+                if live:
+                    live.on_event(event)
+            answer, model = run_session(channel, thread_ts, requests, key, resumed, on_event)
         finally:
             run_slots.release()
         reply(answer or f"{requesters} the Claude session ended without an answer.", footer=footer(model))

@@ -125,6 +125,12 @@ class ProgressTest(unittest.TestCase):
 
 
 class TitleTest(unittest.TestCase):
+    def test_step_titles_skip_subagents_and_bookkeeping(self):
+        self.assertEqual(progress.step_titles(turn(tool("t1", "Read", file_path="/a/b.py"), tool("t2", "TodoWrite"))),
+                         ["Read b.py"])
+        self.assertEqual(progress.step_titles({**turn(tool("t1")), "parent_tool_use_id": "t0"}), [])
+        self.assertEqual(progress.step_titles(result("t1")), [])
+
     def test_titles(self):
         cases = [
             ("Bash", {"command": "pytest -q", "description": "Run the tests"}, "Run the tests"),

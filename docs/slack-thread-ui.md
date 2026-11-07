@@ -42,6 +42,13 @@ its resting text. Reset the thread when done (`agents.sessions.setStatus ... sta
 - Probe a card before merging a change to `cards.py`:
   `scripts/slack-probe.py chat.postMessage channel=C123 thread_ts=1700000000.000100 text=probe blocks='[...]'`.
 
+## Live steps in the status
+
+- With `CLAUDINO_STREAM` off (the default), each tool call's title goes to the shimmer status: its
+  `loading_messages` become the latest 3 steps, newest first (`show_step`). Haiku's lines for the
+  request show until the first step. The refresher sets the status at most every
+  `STATUS_MIN_SECONDS` (3 s), since tool calls can come several a second.
+
 ## Live progress streams
 
 - `chat.startStream` needs `recipient_user_id` and `recipient_team_id` in channels; claudino passes

@@ -62,6 +62,21 @@ def task_title(name: str, args: dict) -> str:
     return short(name)
 
 
+MAX_STEP_LINES = 3  # latest steps the shimmer status rotates through
+
+
+def step_titles(event: dict) -> list:
+    """Task titles of the tool calls in one stream-json event, for the shimmer status (plain text, so no
+    backticks). Subagent events and bookkeeping tools give none."""
+    if event.get("type") != "assistant" or event.get("parent_tool_use_id"):
+        return []
+    content = (event.get("message") or {}).get("content")
+    if not isinstance(content, list):
+        return []
+    return [task_title(c.get("name", ""), c.get("input")).replace("`", "") for c in content
+            if c.get("type") == "tool_use" and c.get("name") not in HIDDEN_TOOLS]
+
+
 STREAM_MESSAGES = set()  # ts of every progress message: their message events are not answers
 HIDDEN_TOOLS = {"TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "ToolSearch"}
 
