@@ -8,6 +8,8 @@
   together by one next run once claudino replies, so work is never duplicated.
 - Each request gets an emoji reaction as soon as it is seen, and the thread shows a
   loading status with rotating lines Haiku writes for the request until the answer is posted.
+- While a run works, its tool calls and the text Claude writes between them stream into the thread
+  as Slack task cards (progress.py); the answer is posted as its own message.
 - A stop from Slack (agent_session_stopped) kills the thread's run and drops its queue. Slack only
   shows the button on agents.sessions statuses, which hide the loading lines, so claudino does not use them.
 
@@ -31,9 +33,11 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk.errors import SlackApiError
 
+import cards
 import claude_cli
 import config
 import fire_claude
+import progress
 
 MAX_CATCH_UP_SECONDS = 24 * 60 * 60  # never replay more than 1 day after an outage
 BUSY_TIMEOUT_SECONDS = 60 * 60  # a run that never replied stops blocking its thread
@@ -47,7 +51,7 @@ log = logging.getLogger("claude-relay")
 
 app = App(token=os.environ["SLACK_BOT_TOKEN"], ignoring_self_events_enabled=False)
 _me = app.client.auth_test()
-RELAY_USER_ID, RELAY_BOT_ID = _me["user_id"], _me.get("bot_id")
+RELAY_USER_ID, RELAY_BOT_ID, RELAY_TEAM_ID = _me["user_id"], _me.get("bot_id"), _me.get("team_id")
 
 lock = threading.Lock()
 busy = {}  # thread_ts -> {"since": float, "channel": str, "requests": [(ts, user)], "pending": [(ts, user)]}
@@ -317,20 +321,24 @@ def ack(channel: str, ts: str, text: str = "") -> None:
 
 def dispatch(message: dict) -> None:
     channel, ts, user = message["channel"], message["ts"], message["user"]
-    thread_ts = message.get("thread_ts") or ts
     ack(channel, ts, message.get("text") or "")
+    request(channel, message.get("thread_ts") or ts, ts, user, message.get("text") or "")
+
+
+def request(channel: str, thread_ts: str, ts: str, user: str, text: str) -> None:
+    """Start a run for the request, or queue it behind the thread's running one."""
     with lock:
         state = busy.get(thread_ts)
         if state and time.time() - state["since"] < BUSY_TIMEOUT_SECONDS:
             state["pending"].append((ts, user))
             save_runs()
             log.info("queued %s: a run for thread %s is still working", ts, thread_ts)
-            update_loading(thread_ts, message.get("text") or "")
+            update_loading(thread_ts, text)
             return
         busy[thread_ts] = {"since": time.time(), "channel": channel, "requests": [(ts, user)], "pending": []}
         save_runs()
         loading_messages.pop(thread_ts, None)  # the last run's lines are about an older request
-    update_loading(thread_ts, message.get("text") or "")
+    update_loading(thread_ts, text)
     start(channel, thread_ts, [(ts, user)])
 
 
@@ -481,12 +489,16 @@ def thread_prompt(channel: str, thread_ts: str, requests: list, key: str, resume
             lines.append(f"[{m['ts']}] {author}: " + untrusted(render(m, fence=False), f"{author}, not on the allowlist"))
     if not fresh:
         lines += forwarded_updates(messages, seen_ts)
+    clicks = [c for c in claude_cli.get(key).get("clicks") or [] if float(c["ts"]) > float(seen_ts)]
+    for c in clicks:
+        lines.append(f"[{c['ts']}] <@{c['user']}> clicked the button \"{c['label']}\" on your message "
+                     f"{c['message_ts']}, which sends you: {c['reply']}")
     requesters = " ".join(sorted({f"<@{user}>" for _, user in requests}))
     header = (f"Slack channel {channel}, thread {thread_ts}. Requesters: {requesters}. "
               f"Requests: the messages with ts {', '.join(ts for ts, _ in requests)}.\n"
               + (RESUMED_NOTE if resumed else "")
               + ("Thread so far:\n" if fresh else "New messages in the thread since your last answer:\n"))
-    last_seen = max([m["ts"] for m in messages] + [seen_ts], key=float)
+    last_seen = max([m["ts"] for m in messages] + [c["ts"] for c in clicks] + [seen_ts], key=float)
     return header + "\n".join(lines), last_seen
 
 
@@ -531,21 +543,50 @@ def show_working(channel: str, thread_ts: str):
     return stop
 
 
-def post(channel: str, thread_ts: str, text: str) -> None:
+def answer_message(answer: str) -> tuple[str, list | None]:
+    """The text and Block Kit blocks to post for an answer. An answer without a card, or with one
+    that is not valid, is posted as text alone (with a note on what was wrong with the card)."""
     try:
-        app.client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=text[:39000], unfurl_links=False)
+        text, spec = cards.split(answer)
+        if not spec:
+            return text, None
+        return "\n".join(p for p in (text, cards.summary(spec)) if p), cards.blocks(text, spec)
+    except cards.CardError as error:
+        log.warning("card left out: %s", error)
+        text = cards.CARD_FENCE.sub("", answer.rstrip()).rstrip()
+        return f"{text}\n_(card left out: {error})_", None
+
+
+def footer(model: str) -> str:
+    """The line under each answer: the model Claude reports and the configured effort."""
+    return f"{model or config.MODEL or 'default model'} · {config.EFFORT} effort"
+
+
+def post(channel: str, thread_ts: str, text: str, footer: str = "") -> None:
+    """Post an answer, its card as blocks, and the footer under it: small grey text below the blocks,
+    an italic last line in the text."""
+    text, blocks = answer_message(text)
+    if footer:
+        note = f"\n\n_{footer}_"
+        text = text[:39000 - len(note)] + note
+        if blocks and len(blocks) < cards.MAX_BLOCKS:
+            blocks = blocks + [{"type": "context", "elements": [{"type": "mrkdwn", "text": footer}]}]
+    try:
+        try:
+            app.client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=text[:39000], blocks=blocks,
+                                        unfurl_links=False)
+        except SlackApiError as error:
+            if not blocks:
+                raise
+            log.warning("blocks refused in %s (%s): posting text only", thread_ts, error.response.get("error"))
+            app.client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=text[:39000], unfurl_links=False)
     except SlackApiError as error:
         log.error("post in %s failed: %s", thread_ts, error.response.get("error"))
         reply_done(thread_ts)
 
 
-def footer(model: str) -> str:
-    """The line under each answer: the model Claude reports and the configured effort."""
-    model = model or config.MODEL or "default model"
-    return f"\n\n_{model} · {config.EFFORT or 'default'} effort_"
-
-
-def run_session(channel: str, thread_ts: str, requests: list, key: str, resumed: bool) -> tuple[str, str]:
+def run_session(channel: str, thread_ts: str, requests: list, key: str, resumed: bool,
+                on_event=None) -> tuple[str, str]:
     """Hand the thread's new messages to its Claude session; retry once with a new session.
     Returns (answer, model)."""
     for attempt in range(2):
@@ -555,7 +596,7 @@ def run_session(channel: str, thread_ts: str, requests: list, key: str, resumed:
                 busy[thread_ts]["seen_until"] = float(last_seen)
         try:
             started = time.time()
-            answer, is_error, model = claude_cli.run(key, prompt)
+            answer, is_error, model = claude_cli.run(key, prompt, on_event)
             claude_cli.update(key, seen_ts=last_seen)
             log.info("session %s answered in %.0fs (error=%s, model=%s)", key, time.time() - started, is_error, model)
             return answer, model
@@ -567,13 +608,19 @@ def run_session(channel: str, thread_ts: str, requests: list, key: str, resumed:
 
 def work(channel: str, thread_ts: str, requests: list) -> None:
     stop_status = show_working(channel, thread_ts)
+    live = progress.Progress(app.client, channel, thread_ts, requests[0][1], RELAY_TEAM_ID) if config.STREAM else None
     with lock:
         state = busy.get(thread_ts) or {}
         resumed = state.pop("resumed", False)
+        state["streaming"] = bool(live)  # its stream messages must not end the run (see on_message)
 
-    def reply(text: str) -> None:
+    def reply(text: str, ok: bool = True, footer: str = "") -> None:
         stop_status()
-        post(channel, thread_ts, text)
+        if live:
+            live.close(ok)
+        with lock:
+            state["final"] = True
+        post(channel, thread_ts, text, footer)
         with lock:
             if busy.get(thread_ts) is state:
                 state["answered"] = True  # a restart before the reply_done event must not rerun it
@@ -588,20 +635,28 @@ def work(channel: str, thread_ts: str, requests: list) -> None:
             log.info("session %s waits: %d runs already working", key, config.MAX_RUNS)
             run_slots.acquire()
         try:
-            answer, model = run_session(channel, thread_ts, requests, key, resumed)
+            if live:
+                live.start()
+            answer, model = run_session(channel, thread_ts, requests, key, resumed, live and live.on_event)
         finally:
             run_slots.release()
-        answer = answer or f"{requesters} the Claude session ended without an answer."
-        note = footer(model)
-        reply(answer[:39000 - len(note)] + note)
+        reply(answer or f"{requesters} the Claude session ended without an answer.", footer=footer(model))
     except claude_cli.Stopped:
         with lock:
             who = (busy.get(thread_ts) or {}).get("stopped_by")
         log.info("session %s stopped by %s", key, who)
-        reply(f"Stopped by <@{who}>." if who else "Stopped.")
+        reply(f"Stopped by <@{who}>." if who else "Stopped.", ok=False)
     except Exception as error:
         log.error("session %s failed: %s", key, error)
-        reply(f"{requesters} the Claude session failed: `{str(error)[:300]}`")
+        reply(f"{requesters} the Claude session failed: `{str(error)[:300]}`", ok=False)
+
+
+def streaming(thread_ts: str) -> bool:
+    """The thread's run is streaming its progress and has not posted its answer: claudino's messages
+    there are progress, not the answer that ends the run."""
+    with lock:
+        state = busy.get(thread_ts) or {}
+        return bool(state.get("streaming")) and not state.get("final")
 
 
 def reply_done(thread_ts: str) -> None:
@@ -629,7 +684,7 @@ def on_message(event: dict) -> None:
         hand_over(event["ts"])
         return
     if is_from_claudino(event):
-        if event.get("thread_ts"):
+        if event.get("thread_ts") and event.get("ts") not in progress.STREAM_MESSAGES and not streaming(event["thread_ts"]):
             reply_done(event["thread_ts"])
         return
     if event.get("subtype") or event.get("bot_id") or not event.get("user"):
@@ -667,6 +722,46 @@ def on_session_stopped(event: dict) -> None:
 @app.event("reaction_added")
 def on_reaction(event: dict) -> None:
     """Acknowledge the event so Bolt does not log it as unhandled."""
+
+
+def picked(blocks: list, action_id: str, user: str, label: str) -> list:
+    """The message's blocks with the clicked button's row replaced by who picked what."""
+    note = {"type": "context", "elements": [{"type": "mrkdwn", "text": f"<@{user}> picked *{label}*"}]}
+    return [note if b.get("type") == "actions" and any(e.get("action_id") == action_id for e in b.get("elements") or [])
+            else b for b in blocks]
+
+
+@app.action(re.compile(f"^{cards.REPLY_ACTION}_"))
+def on_reply_button(ack, body: dict) -> None:
+    """A teammate clicked a reply button on a card: send its reply to the thread's session as their request.
+    The buttons give way to a note, so nobody sends the same reply twice."""
+    ack()
+    user, action = body["user"]["id"], body["actions"][0]
+    if user not in config.ALLOWED_USERS:
+        log.info("ignore button in %s from %s: not allowed", body.get("container", {}).get("message_ts"), user)
+        return
+    channel, message = body["channel"]["id"], body["message"]
+    thread_ts = message.get("thread_ts") or message["ts"]
+    label, reply, ts = action["text"]["text"], action["value"], action["action_ts"]
+    try:
+        app.client.chat_update(channel=channel, ts=message["ts"], text=message.get("text") or label,
+                               blocks=picked(message.get("blocks") or [], action["action_id"], user, label))
+    except SlackApiError as error:
+        log.warning("update after a click in %s failed: %s", thread_ts, error.response.get("error"))
+    key = f"{channel}:{thread_ts}"
+    seen = float(claude_cli.get(key).get("seen_ts") or 0)
+    clicks = [c for c in claude_cli.get(key).get("clicks") or [] if float(c["ts"]) > seen]
+    claude_cli.update(key, clicks=clicks + [{"ts": ts, "user": user, "label": label, "reply": reply,
+                                             "message_ts": message["ts"]}])
+    log.info("button %r in %s from %s", label, thread_ts, user)
+    active_threads.add((channel, thread_ts))
+    request(channel, thread_ts, ts, user, reply)
+
+
+@app.action(re.compile(f"^{cards.LINK_ACTION}_"))
+def on_link_button(ack) -> None:
+    """Slack opens link buttons itself but still sends the click: acknowledge it."""
+    ack()
 
 
 def remember(ts: str) -> None:
