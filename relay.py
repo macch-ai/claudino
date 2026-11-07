@@ -539,8 +539,15 @@ def post(channel: str, thread_ts: str, text: str) -> None:
         reply_done(thread_ts)
 
 
-def run_session(channel: str, thread_ts: str, requests: list, key: str, resumed: bool) -> str:
-    """Hand the thread's new messages to its Claude session; retry once with a new session."""
+def footer(model: str) -> str:
+    """The line under each answer: the model Claude reports and the configured effort."""
+    model = model or config.MODEL or "default model"
+    return f"\n\n_{model} · {config.EFFORT or 'default'} effort_"
+
+
+def run_session(channel: str, thread_ts: str, requests: list, key: str, resumed: bool) -> tuple[str, str]:
+    """Hand the thread's new messages to its Claude session; retry once with a new session.
+    Returns (answer, model)."""
     for attempt in range(2):
         prompt, last_seen = thread_prompt(channel, thread_ts, requests, key, resumed)
         with lock:
@@ -548,10 +555,10 @@ def run_session(channel: str, thread_ts: str, requests: list, key: str, resumed:
                 busy[thread_ts]["seen_until"] = float(last_seen)
         try:
             started = time.time()
-            answer, is_error = claude_cli.run(key, prompt)
+            answer, is_error, model = claude_cli.run(key, prompt)
             claude_cli.update(key, seen_ts=last_seen)
-            log.info("session %s answered in %.0fs (error=%s)", key, time.time() - started, is_error)
-            return answer
+            log.info("session %s answered in %.0fs (error=%s, model=%s)", key, time.time() - started, is_error, model)
+            return answer, model
         except RuntimeError as error:
             if attempt:
                 raise
@@ -581,10 +588,12 @@ def work(channel: str, thread_ts: str, requests: list) -> None:
             log.info("session %s waits: %d runs already working", key, config.MAX_RUNS)
             run_slots.acquire()
         try:
-            answer = run_session(channel, thread_ts, requests, key, resumed)
+            answer, model = run_session(channel, thread_ts, requests, key, resumed)
         finally:
             run_slots.release()
-        reply(answer or f"{requesters} the Claude session ended without an answer.")
+        answer = answer or f"{requesters} the Claude session ended without an answer."
+        note = footer(model)
+        reply(answer[:39000 - len(note)] + note)
     except claude_cli.Stopped:
         with lock:
             who = (busy.get(thread_ts) or {}).get("stopped_by")

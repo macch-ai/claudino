@@ -340,10 +340,33 @@ class EmojiTest(RelayTest):
         self.assertEqual(names, ["not_an_emoji", "eyes"])
 
 
+DONE = "done!\n\n_claude-opus-5-5 · medium effort_"
+
+
+class FooterTest(RelayTest):
+    def test_footer_shows_the_reported_model_and_the_configured_effort(self):
+        with mock.patch.multiple(self.r.config, MODEL="opus", EFFORT="high"):
+            self.assertEqual(self.r.footer("claude-opus-5-5"), "\n\n_claude-opus-5-5 · high effort_")
+            self.assertEqual(self.r.footer(""), "\n\n_opus · high effort_")
+        with mock.patch.multiple(self.r.config, MODEL="", EFFORT=""):
+            self.assertEqual(self.r.footer(""), "\n\n_default model · default effort_")
+
+    def test_long_answers_keep_the_footer(self):
+        posted = []
+        self.client.chat_postMessage.side_effect = lambda **kw: posted.append(kw["text"])
+        with mock.patch.object(self.r, "show_working", return_value=lambda: None), \
+                mock.patch.object(self.r, "run_session", return_value=("x" * 50000, "claude-opus-5-5")), \
+                mock.patch.multiple(self.r.config, STATUS="", EFFORT=""):
+            self.r.work("C1", "1.0", [("1.0", ALICE)])
+        self.assertEqual(len(posted[0]), 39000)
+        self.assertTrue(posted[0].endswith("_claude-opus-5-5 · default effort_"))
+
+
 class StatusTest(RelayTest):
     def setUp(self):
         super().setUp()
-        patcher = mock.patch.multiple(self.r.config, STATUS="is working on it...", LOADING_MESSAGES=["Warming up"])
+        patcher = mock.patch.multiple(self.r.config, STATUS="is working on it...", LOADING_MESSAGES=["Warming up"],
+                                      EFFORT="medium")
         patcher.start()
         self.addCleanup(patcher.stop)
         self.r.loading_messages.clear()
@@ -362,16 +385,16 @@ class StatusTest(RelayTest):
 
     def work(self, run=None):
         with mock.patch.object(self.r, "thread_prompt", return_value=("prompt", "3.0")), \
-                mock.patch.object(self.r.claude_cli, "run", side_effect=run or (lambda key, prompt: ("done!", False))), \
+                mock.patch.object(self.r.claude_cli, "run", side_effect=run or (lambda key, prompt: ("done!", False, "claude-opus-5-5"))), \
                 mock.patch.object(self.r.claude_cli, "update"):
             self.r.work("C1", "1.0", [("1.0", ALICE)])
 
     def test_status_shows_while_working_and_stops_before_the_answer(self):
         def run(key, prompt):
             self.wait_for(lambda: self.calls)
-            return "done!", False
+            return "done!", False, "claude-opus-5-5"
         self.work(run)
-        self.assertEqual(self.calls, [("status", "is working on it...", ["Warming up"]), ("post", "done!"),
+        self.assertEqual(self.calls, [("status", "is working on it...", ["Warming up"]), ("post", DONE),
                                       ("status", "", None)])
         kwargs = self.client.assistant_threads_setStatus.call_args.kwargs
         self.assertEqual((kwargs["channel_id"], kwargs["thread_ts"]), ("C1", "1.0"))
@@ -401,7 +424,7 @@ class StatusTest(RelayTest):
             self.work()
         pick.assert_not_called()
         self.client.assistant_threads_setStatus.assert_not_called()
-        self.assertEqual(self.calls, [("post", "done!")])
+        self.assertEqual(self.calls, [("post", DONE)])
 
     def test_failed_post_clears_the_status(self):
         self.client.chat_postMessage.side_effect = SlackApiError("bad", {"error": "channel_not_found"})
@@ -540,7 +563,7 @@ class RunSlotsTest(RelayTest):
             seen.append(len(running))
             release.wait(5)
             running.pop()
-            return "ok"
+            return "ok", ""
         mock.patch.object(self.r, "run_session", side_effect=session).start()
         threads = [threading.Thread(target=self.r.work, args=("C1", ts, [(ts, ALICE)])) for ts in ("1.0", "2.0")]
         for t in threads:

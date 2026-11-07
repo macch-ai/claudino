@@ -45,6 +45,10 @@ def _session_path(path: str) -> str:
 
 WORKDIR = Path(_session_path(_str("CLAUDINO_WORKDIR", "~")))
 PERMISSION_MODE = _str("CLAUDINO_PERMISSION_MODE", "bypassPermissions")
+# Model and effort for sessions (claude --model / --effort). An empty model uses Claude Code's default.
+# Claude does not report the effort it used, so the footer under each answer shows EFFORT.
+MODEL = _str("CLAUDINO_MODEL")
+EFFORT = _str("CLAUDINO_EFFORT", "medium")
 EXTRA_PATH = [_session_path(p) for p in _str("CLAUDINO_EXTRA_PATH", "~/.local/bin").split(":") if p]
 PROMPT_SUFFIX = _str("CLAUDINO_PROMPT_SUFFIX")  # appended to every relayed request, e.g. "caveman mode"
 # Thread status shown while a run works ("claudino <status>"). Haiku writes rotating lines for

@@ -30,9 +30,10 @@ class ClaudeCliTest(unittest.TestCase):
         def claude(prompt, session_id, key, new):
             self.assertTrue(new)
             self.assertEqual(claude_cli.get("k")["session_id"], session_id)  # saved before the run starts
-            return {"result": "hola", "session_id": session_id}
+            return {"result": "hola", "session_id": session_id, "modelUsage": {
+                "claude-haiku-5-5": {"costUSD": 0.01}, "claude-opus-5-5": {"costUSD": 0.5}}}
         with mock.patch.object(claude_cli, "_claude", side_effect=claude):
-            self.assertEqual(claude_cli.run("k", "prompt"), ("hola", False))
+            self.assertEqual(claude_cli.run("k", "prompt"), ("hola", False, "claude-opus-5-5"))
         self.assertEqual(len(claude_cli.get("k")["session_id"]), 36)
 
     def test_later_runs_resume_the_thread_session(self):
@@ -71,6 +72,14 @@ class ClaudeCliTest(unittest.TestCase):
         self.assertIn("--dangerously-skip-permissions", cmd)
         self.assertNotIn("--permission-mode", cmd)
         self.assertEqual(self.stdin, "prompt")
+
+    def test_model_and_effort_are_passed_when_set(self):
+        cmd = self.claude_cmd(MODEL="opus", EFFORT="high")
+        self.assertEqual(cmd[cmd.index("--model") + 1], "opus")
+        self.assertEqual(cmd[cmd.index("--effort") + 1], "high")
+        cmd = self.claude_cmd(MODEL="", EFFORT="")  # CLAUDINO_EFFORT defaults to medium; empty only in tests
+        self.assertNotIn("--model", cmd)
+        self.assertNotIn("--effort", cmd)
 
     def test_other_permission_modes_are_passed_through(self):
         cmd = self.claude_cmd(PERMISSION_MODE="auto")
