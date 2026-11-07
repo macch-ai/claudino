@@ -27,7 +27,7 @@ class ClaudeCliTest(unittest.TestCase):
         self.assertEqual(claude_cli.get("C1:2.0"), {})
 
     def test_first_run_starts_a_session_and_saves_it(self):
-        def claude(prompt, session_id, key, new):
+        def claude(prompt, session_id, key, new, on_event):
             self.assertTrue(new)
             self.assertEqual(claude_cli.get("k")["session_id"], session_id)  # saved before the run starts
             return {"result": "hola", "session_id": session_id}
@@ -39,16 +39,48 @@ class ClaudeCliTest(unittest.TestCase):
         claude_cli.update("k", session_id="S1")
         with mock.patch.object(claude_cli, "_claude", return_value={"result": "ok", "session_id": "S1"}) as claude:
             claude_cli.run("k", "prompt")
-        claude.assert_called_once_with("prompt", "S1", "k", False)
+        claude.assert_called_once_with("prompt", "S1", "k", False, None)
+
+    @staticmethod
+    def fake_proc(*lines):
+        proc = mock.Mock(returncode=0)
+        proc.stdout = iter(lines or ['{"type": "result", "result": "ok"}\n'])
+        proc.stderr = iter([])
+        return proc
 
     def claude_cmd(self, **settings):
-        proc = mock.Mock(returncode=0)
-        proc.communicate.return_value = ('{"result": "ok"}', "")
+        proc = self.fake_proc()
         with mock.patch.multiple(claude_cli.config, **settings), \
                 mock.patch.object(claude_cli.subprocess, "Popen", return_value=proc) as popen:
             claude_cli._claude("prompt", None)
-        self.stdin = proc.communicate.call_args.args[0]
+        self.stdin = proc.stdin.write.call_args.args[0]
         return popen.call_args.args[0]
+
+    def test_events_stream_to_the_caller_and_the_result_is_returned(self):
+        events = []
+        proc = self.fake_proc('{"type": "system", "subtype": "init"}\n', "not json\n",
+                              '{"type": "assistant", "message": {"content": []}}\n',
+                              '{"type": "result", "result": "hola", "session_id": "S1"}\n')
+        with mock.patch.object(claude_cli.subprocess, "Popen", return_value=proc) as popen:
+            result = claude_cli._claude("prompt", None, on_event=events.append)
+        self.assertEqual(result, {"type": "result", "result": "hola", "session_id": "S1"})
+        self.assertEqual([e["type"] for e in events], ["system", "assistant"])
+        cmd = popen.call_args.args[0]
+        self.assertEqual(cmd[cmd.index("--output-format") + 1], "stream-json")
+        self.assertIn("--verbose", cmd)
+
+    def test_a_failing_progress_handler_does_not_break_the_run(self):
+        proc = self.fake_proc('{"type": "assistant"}\n', '{"type": "result", "result": "ok"}\n')
+        with mock.patch.object(claude_cli.subprocess, "Popen", return_value=proc):
+            result = claude_cli._claude("prompt", None, on_event=mock.Mock(side_effect=ValueError("slack down")))
+        self.assertEqual(result["result"], "ok")
+
+    def test_run_without_a_result_is_an_error(self):
+        proc = self.fake_proc('{"type": "system"}\n')
+        proc.stderr = iter(["boom\n"])
+        with mock.patch.object(claude_cli.subprocess, "Popen", return_value=proc):
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                claude_cli._claude("prompt", None)
 
     def test_prompts_stay_off_the_command_line(self):
         cmd = self.claude_cmd(PROMPT_SUFFIX="")
@@ -57,9 +89,7 @@ class ClaudeCliTest(unittest.TestCase):
         self.assertFalse(any(arg.startswith("You are claudino") for arg in cmd))
 
     def test_new_sessions_get_their_id_up_front(self):
-        proc = mock.Mock(returncode=0)
-        proc.communicate.return_value = ('{"result": "ok"}', "")
-        with mock.patch.object(claude_cli.subprocess, "Popen", return_value=proc) as popen:
+        with mock.patch.object(claude_cli.subprocess, "Popen", side_effect=[self.fake_proc(), self.fake_proc()]) as popen:
             claude_cli._claude("prompt", "ID1", "k", True)
             claude_cli._claude("prompt", "ID1", "k", False)
         first, second = (c.args[0] for c in popen.call_args_list)

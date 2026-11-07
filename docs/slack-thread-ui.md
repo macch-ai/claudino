@@ -41,3 +41,17 @@ its resting text. Reset the thread when done (`agents.sessions.setStatus ... sta
   replaces the button row with "<@user> picked *label*" (`chat.update`), so a reply is sent once.
 - Probe a card before merging a change to `cards.py`:
   `scripts/slack-probe.py chat.postMessage channel=C123 thread_ts=1700000000.000100 text=probe blocks='[...]'`.
+
+## Live progress streams
+
+- `chat.startStream` needs `recipient_user_id` and `recipient_team_id` in channels; claudino passes
+  the first requester and its own team. Chunks are `task_update` cards (`timeline` mode) and
+  `markdown_text` narration; one stream never mixes `markdown_text` arguments with `chunks`.
+- A stream lasts at most 10 minutes and 12,000 text characters / 50 tasks. `progress.py` stops the
+  stream at 9 minutes or near a cap and opens a new one, carrying tasks still in progress over.
+- The stream's own message events must not end the run: `on_message` skips claudino messages while
+  the thread's run streams and has not posted its answer, and every stream message `ts`.
+- Probed live 2026-11-07 (#claudino-test): start, append (complete and error tasks) and stop all work
+  in a channel thread. The stream message carries `user`, `streaming_state` and `blocks`; its `text`
+  holds the narration plus the task titles. Probe again with
+  `scripts/slack-probe.py chat.startStream channel=C123 thread_ts=... recipient_user_id=U... recipient_team_id=T... chunks='[{"type":"task_update","id":"t1","title":"Run tests","status":"in_progress"}]'`.
