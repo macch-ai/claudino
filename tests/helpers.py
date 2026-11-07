@@ -13,6 +13,7 @@ def load_relay():
     fake_app = mock.MagicMock()
     fake_app.client.auth_test.return_value = {"user_id": RELAY_USER_ID, "bot_id": RELAY_BOT_ID}
     fake_app.event = lambda name: (lambda handler: handler)
+    fake_app.action = lambda matcher: (lambda handler: handler)
     bolt = types.ModuleType("slack_bolt")
     bolt.App = mock.MagicMock(return_value=fake_app)
     adapter = types.ModuleType("slack_bolt.adapter")
