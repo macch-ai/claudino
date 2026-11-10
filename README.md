@@ -92,7 +92,7 @@ All settings live in `~/.config/claude-relay/env`. [`.env.example`](.env.example
 | `CLAUDINO_TIMEOUT_SECONDS` | `3000` | Kill a run after this long |
 | `CLAUDINO_MAX_RUNS` | `3` | Claude runs working at once; other threads wait for a free slot |
 | `CLAUDINO_FILES_KEEP_DAYS` | `14` | Delete files downloaded from Slack after this many days; `0` keeps them |
-| `CLAUDINO_ALERT_*`, `CLAUDINO_CLAUDE_APP_USER`, `CLAUDINO_DEPLOY_ALERT_APP` | empty: off | Sentry and deploy alert hand-over, see below |
+| `CLAUDINO_ALERT_*`, `CLAUDINO_CLAUDE_APP_USER`, `CLAUDINO_DEPLOY_ALERT_BOT` | empty: off | Sentry and deploy alert hand-over, see below |
 
 **Private instructions.** Anything in `~/.config/claude-relay/instructions.md` is appended to the system prompt. Put your team's specifics there (repositories, CLIs, people, PR labels) so they stay out of this repo.
 
@@ -100,7 +100,7 @@ All settings live in `~/.config/claude-relay/env`. [`.env.example`](.env.example
 
 Set all three to turn it on: `CLAUDINO_ALERT_CHANNEL` (where Sentry posts), `CLAUDINO_ALERT_BOT_USER` (the Sentry app's user ID) and `CLAUDINO_ALERT_ROUTINE_URL` (your routine's `/fire` endpoint). Put the routine's API token in `~/.config/claude-alert-fire/token`. On start, claudino catches up on alerts from the last 24 hours it missed.
 
-Set `CLAUDINO_DEPLOY_ALERT_APP` to also hand over failed-deploy alerts: top-level posts in the alert channel from that Slack app ID (for example an incoming webhook fed by Cloudflare Workers Builds). The routine receives `deploy_alert_ts=<ts>` instead of `alert_ts=<ts>`, so its prompt can follow a deploy-failure procedure.
+Set `CLAUDINO_DEPLOY_ALERT_BOT` to also hand over failed-deploy alerts: top-level posts in the alert channel from that bot ID (`B...`; incoming-webhook posts carry no user or app ID; for example a webhook fed by Cloudflare Workers Builds). The routine receives `deploy_alert_ts=<ts>` instead of `alert_ts=<ts>`, so its prompt can follow a deploy-failure procedure.
 
 With `CLAUDINO_RUN_AS`, the routine's session cannot read the bot token. It reacts and replies through `sudo -n -H -u claudino ~claudino/claude-relay/.venv/bin/python ~claudino/claude-relay/scripts/alert-slack.py add|get|post ...`, which acts only in `CLAUDINO_ALERT_CHANNEL` (sudo rule from `deploy/setup-relay-user.sh`).
 

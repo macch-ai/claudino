@@ -144,10 +144,13 @@ def is_sentry_alert(message: dict) -> bool:
 
 
 def is_deploy_alert(message: dict) -> bool:
-    """A top-level failed-deploy alert posted in the alert channel by the deploy-alert app."""
+    """A top-level failed-deploy alert posted in the alert channel by the deploy-alert bot.
+
+    Incoming-webhook posts carry only a bot ID: no user and no app ID.
+    """
     is_reply = message.get("thread_ts") not in (None, message.get("ts"))
-    return (config.alerts_enabled() and bool(config.DEPLOY_ALERT_APP)
-            and message.get("app_id") == config.DEPLOY_ALERT_APP
+    return (config.alerts_enabled() and bool(config.DEPLOY_ALERT_BOT)
+            and message.get("bot_id") == config.DEPLOY_ALERT_BOT
             and message.get("channel", config.ALERT_CHANNEL) == config.ALERT_CHANNEL and not is_reply)
 
 

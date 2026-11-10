@@ -79,7 +79,7 @@ ALERT_BOT_USER = _str("CLAUDINO_ALERT_BOT_USER")  # the Sentry app's bot user ID
 ALERT_ROUTINE_URL = _str("CLAUDINO_ALERT_ROUTINE_URL")  # the routine's /fire endpoint
 ALERT_TOKEN_FILE = _path("CLAUDINO_ALERT_TOKEN_FILE", "~/.config/claude-alert-fire/token")
 CLAUDE_APP_USER = _str("CLAUDINO_CLAUDE_APP_USER")  # Claude app user; its mentions in the alert channel count too
-DEPLOY_ALERT_APP = _str("CLAUDINO_DEPLOY_ALERT_APP")  # app whose posts in the alert channel are failed-deploy alerts
+DEPLOY_ALERT_BOT = _str("CLAUDINO_DEPLOY_ALERT_BOT")  # bot ID (B...) whose posts in the alert channel are failed-deploy alerts
 
 
 def alerts_enabled() -> bool:
