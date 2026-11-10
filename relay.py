@@ -143,6 +143,14 @@ def is_sentry_alert(message: dict) -> bool:
             and message.get("channel", config.ALERT_CHANNEL) == config.ALERT_CHANNEL and not is_reply)
 
 
+def is_deploy_alert(message: dict) -> bool:
+    """A top-level failed-deploy alert posted in the alert channel by the deploy-alert app."""
+    is_reply = message.get("thread_ts") not in (None, message.get("ts"))
+    return (config.alerts_enabled() and bool(config.DEPLOY_ALERT_APP)
+            and message.get("app_id") == config.DEPLOY_ALERT_APP
+            and message.get("channel", config.ALERT_CHANNEL) == config.ALERT_CHANNEL and not is_reply)
+
+
 def already_handed_over(ts: str) -> bool:
     """Claude already took the alert or someone already mentioned it in the thread."""
     replies = app.client.conversations_replies(channel=config.ALERT_CHANNEL, ts=ts, limit=50)["messages"]
@@ -152,14 +160,14 @@ def already_handed_over(ts: str) -> bool:
     return any(m.get("user") and m.get("user") in (RELAY_USER_ID, config.CLAUDE_APP_USER) for m in thread)
 
 
-def hand_over(ts: str) -> None:
+def hand_over(ts: str, kind: str = "sentry") -> None:
     try:
         if already_handed_over(ts):
             log.info("skip %s: already handed over", ts)
             remember(ts)
             return
         active_threads.add((config.ALERT_CHANNEL, ts))
-        url = fire_claude.fire(ts)
+        url = fire_claude.fire(ts, kind=kind)
         log.info("fired Claude task for %s: %s", ts, url)
         remember(ts)
     except SlackApiError as error:
@@ -738,6 +746,9 @@ def on_message(event: dict) -> None:
     if is_sentry_alert(event):
         hand_over(event["ts"])
         return
+    if is_deploy_alert(event):
+        hand_over(event["ts"], kind="deploy")
+        return
     if is_from_claudino(event):
         if event.get("thread_ts") and event.get("ts") not in progress.STREAM_MESSAGES and not streaming(event["thread_ts"]):
             reply_done(event["thread_ts"])
@@ -838,8 +849,12 @@ def catch_up() -> None:
         log.warning("cannot read missed alerts in %s: %s", config.ALERT_CHANNEL, e.response.get("error"))
         return
     for message in reversed(history):
-        if is_sentry_alert(message) and message["ts"] != oldest:
+        if message["ts"] == oldest:
+            continue
+        if is_sentry_alert(message):
             hand_over(message["ts"])
+        elif is_deploy_alert(message):
+            hand_over(message["ts"], kind="deploy")
 
 
 if __name__ == "__main__":

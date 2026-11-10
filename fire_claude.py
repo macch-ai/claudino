@@ -10,10 +10,15 @@ import urllib.request
 import config
 
 
-def fire(ts: str, extra: str = "") -> str:
-    text = (f"alert_ts={ts}\nchannel={config.ALERT_CHANNEL}\n"
-            "A new Sentry alert was posted at the top level of the alerts channel. "
-            "Read it and its thread with the Slack connector.")
+def fire(ts: str, extra: str = "", kind: str = "sentry") -> str:
+    if kind == "deploy":
+        text = (f"deploy_alert_ts={ts}\nchannel={config.ALERT_CHANNEL}\n"
+                "A Cloudflare Workers Build failed: the deploy-alert app posted it at the top level of "
+                "the alerts channel. Read it and its thread with the Slack connector.")
+    else:
+        text = (f"alert_ts={ts}\nchannel={config.ALERT_CHANNEL}\n"
+                "A new Sentry alert was posted at the top level of the alerts channel. "
+                "Read it and its thread with the Slack connector.")
     return fire_text(text + extra)
 
 

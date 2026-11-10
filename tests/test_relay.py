@@ -31,7 +31,7 @@ class RelayTest(unittest.TestCase):
         self.client = self.r.app.client
         self.client.conversations_replies.return_value = {"messages": []}
         patcher = mock.patch.multiple(
-            self.r.config, ALLOWED_USERS={ALICE, BOB}, ALERT_CHANNEL=ALERTS, ALERT_BOT_USER=SENTRY,
+            self.r.config, ALLOWED_USERS={ALICE, BOB}, ALERT_CHANNEL=ALERTS, ALERT_BOT_USER=SENTRY, DEPLOY_ALERT_APP="A_DEPLOY",
             ALERT_ROUTINE_URL="https://example.test/fire", CLAUDE_APP_USER=CLAUDE_TAG, STREAM=False,
             STEP_MESSAGE=False)
         patcher.start()
@@ -100,6 +100,19 @@ class OnMessageTest(RelayTest):
                 mock.patch.object(self.r, "hand_over") as hand_over:
             self.r.catch_up()
         hand_over.assert_not_called()
+
+    def test_deploy_alert_is_handed_over_as_a_deploy_alert(self):
+        with mock.patch.object(self.r, "hand_over") as hand_over:
+            self.r.on_message({"channel": ALERTS, "app_id": "A_DEPLOY", "bot_id": "B1",
+                               "subtype": "bot_message", "ts": "7.0"})
+        hand_over.assert_called_once_with("7.0", kind="deploy")
+
+    def test_deploy_alert_needs_its_app_and_the_alert_channel(self):
+        self.assertFalse(self.r.is_deploy_alert({"channel": ALERTS, "app_id": "A_OTHER", "ts": "7.0"}))
+        self.assertFalse(self.r.is_deploy_alert({"channel": "C1", "app_id": "A_DEPLOY", "ts": "7.0"}))
+        self.assertFalse(self.r.is_deploy_alert({"channel": ALERTS, "app_id": "A_DEPLOY", "ts": "8.0", "thread_ts": "7.0"}))
+        with mock.patch.object(self.r.config, "DEPLOY_ALERT_APP", ""):
+            self.assertFalse(self.r.is_deploy_alert({"channel": ALERTS, "app_id": "", "ts": "7.0"}))
 
     def test_sentry_thread_reply_is_not_an_alert(self):
         self.assertFalse(self.r.is_sentry_alert({"user": SENTRY, "ts": "6.0", "thread_ts": "5.0"}))

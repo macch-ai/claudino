@@ -50,3 +50,10 @@ class FireTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_deploy_alert_fire_says_a_build_failed(self):
+        fire_claude.fire("1.2", kind="deploy")
+        _, text = self.sent()
+        self.assertIn("deploy_alert_ts=1.2", text)
+        self.assertIn("Workers Build", text)
+        self.assertNotIn("\nalert_ts=", "\n" + text)
