@@ -103,12 +103,14 @@ class OnMessageTest(RelayTest):
 
     def test_deploy_alert_is_handed_over_as_a_deploy_alert(self):
         with mock.patch.object(self.r, "hand_over") as hand_over:
-            self.r.on_message({"channel": ALERTS, "bot_id": "B_DEPLOY",
-                               "subtype": "bot_message", "ts": "7.0"})
+            self.r.on_message({"channel": ALERTS, "subtype": "bot_message", "bot_id": "B_DEPLOY",
+                               "ts": "7.0"})
         hand_over.assert_called_once_with("7.0", kind="deploy")
 
-    def test_deploy_alert_needs_its_app_and_the_alert_channel(self):
+    def test_deploy_alert_needs_its_bot_post_in_the_alert_channel(self):
         self.assertFalse(self.r.is_deploy_alert({"channel": ALERTS, "bot_id": "B_OTHER", "ts": "7.0"}))
+        # Slack's "added an integration" notice carries the same bot ID.
+        self.assertFalse(self.r.is_deploy_alert({"channel": ALERTS, "subtype": "bot_add", "bot_id": "B_DEPLOY", "ts": "7.0"}))
         self.assertFalse(self.r.is_deploy_alert({"channel": "C1", "bot_id": "B_DEPLOY", "ts": "7.0"}))
         self.assertFalse(self.r.is_deploy_alert({"channel": ALERTS, "bot_id": "B_DEPLOY", "ts": "8.0", "thread_ts": "7.0"}))
         with mock.patch.object(self.r.config, "DEPLOY_ALERT_BOT", ""):
