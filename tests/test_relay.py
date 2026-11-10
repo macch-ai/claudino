@@ -65,6 +65,15 @@ class OnMessageTest(RelayTest):
             self.r.on_message({"channel": self.r.CHANNEL_ID, "user": self.r.SENTRY_USER_ID, "ts": "5.0"})
         hand_over.assert_called_once_with("5.0")
 
+    def test_deploy_alert_is_handed_over_as_a_deploy_alert(self):
+        with mock.patch.object(self.r, "hand_over") as hand_over:
+            self.r.on_message({"channel": self.r.CHANNEL_ID, "app_id": self.r.DEPLOY_ALERTS_APP_ID,
+                               "bot_id": "B1", "subtype": "bot_message", "ts": "7.0"})
+        hand_over.assert_called_once_with("7.0", kind="deploy")
+
+    def test_deploy_alert_thread_reply_is_not_an_alert(self):
+        self.assertFalse(self.r.is_deploy_alert({"app_id": self.r.DEPLOY_ALERTS_APP_ID, "ts": "8.0", "thread_ts": "7.0"}))
+
     def test_sentry_thread_reply_is_not_an_alert(self):
         self.assertFalse(self.r.is_sentry_alert({"user": self.r.SENTRY_USER_ID, "ts": "6.0", "thread_ts": "5.0"}))
 

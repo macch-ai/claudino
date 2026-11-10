@@ -1,6 +1,6 @@
 """claudino: Slack relay that hands work to Claude Code on hermes.
 
-- New top-level Sentry alerts in #production-errors start the alert task.
+- New top-level Sentry alerts and failed-build alerts in #production-errors start the alert task.
 - A message that mentions @claudino in any public channel it belongs to starts a
   mention run. In a thread where claudino already took part, teammates' replies
   don't need the mention (unless they mention someone else instead).
@@ -30,6 +30,7 @@ import fire_claude
 
 CHANNEL_ID = "C0C7YJPATEK"  # #production-errors
 SENTRY_USER_ID = "U0C8J4GER8W"  # Sentry app's bot user
+DEPLOY_ALERTS_APP_ID = "A0CGKBPA9DG"  # Macch Deploy Alerts: failed Cloudflare Workers Builds
 CLAUDE_USER_ID = "U0C9799P96K"  # Claude (Claude Tag) app; mentions in #production-errors count too
 RELAY_APP_ID = "A0CARJB2Q2C"  # claudino
 ALLOWED_USERS = {"U0C5CGDBP8E", "U0C68RT2SEL"}  # Facundo, Salvador
@@ -54,6 +55,12 @@ def is_sentry_alert(message: dict) -> bool:
     return message.get("user") == SENTRY_USER_ID and not is_reply
 
 
+def is_deploy_alert(message: dict) -> bool:
+    """A top-level failed-build alert posted by the Macch Deploy Alerts webhook."""
+    is_reply = message.get("thread_ts") not in (None, message.get("ts"))
+    return message.get("app_id") == DEPLOY_ALERTS_APP_ID and not is_reply
+
+
 def already_handed_over(ts: str) -> bool:
     """Claude already took the alert or someone already mentioned it in the thread."""
     replies = app.client.conversations_replies(channel=CHANNEL_ID, ts=ts, limit=50)["messages"]
@@ -63,14 +70,14 @@ def already_handed_over(ts: str) -> bool:
     return any(m.get("user") in (RELAY_USER_ID, CLAUDE_USER_ID) for m in thread)
 
 
-def hand_over(ts: str) -> None:
+def hand_over(ts: str, kind: str = "sentry") -> None:
     try:
         if already_handed_over(ts):
             log.info("skip %s: already handed over", ts)
             remember(ts)
             return
         active_threads.add((CHANNEL_ID, ts))
-        url = fire_claude.fire(ts)
+        url = fire_claude.fire(ts, kind=kind)
         log.info("fired Claude task for %s: %s", ts, url)
         remember(ts)
     except SlackApiError as error:
@@ -115,7 +122,7 @@ def addressed_to_claudino(message: dict) -> bool:
 
 def thread_is_alert(thread_ts: str) -> bool:
     parent = app.client.conversations_replies(channel=CHANNEL_ID, ts=thread_ts, limit=1)["messages"][0]
-    return is_sentry_alert(parent)
+    return is_sentry_alert(parent) or is_deploy_alert(parent)
 
 
 EMOJI_PROMPT = (
@@ -327,6 +334,9 @@ def on_message(event: dict) -> None:
     if channel == CHANNEL_ID and is_sentry_alert(event):
         hand_over(event["ts"])
         return
+    if channel == CHANNEL_ID and is_deploy_alert(event):
+        hand_over(event["ts"], kind="deploy")
+        return
     if is_from_claudino(event):
         if event.get("thread_ts"):
             reply_done(event["thread_ts"])
@@ -359,8 +369,12 @@ def catch_up() -> None:
     oldest = str(max(float(STATE_FILE.read_text()), time.time() - MAX_CATCH_UP_SECONDS))
     history = app.client.conversations_history(channel=CHANNEL_ID, oldest=oldest, limit=200)["messages"]
     for message in reversed(history):
-        if is_sentry_alert(message) and message["ts"] != oldest:
+        if message["ts"] == oldest:
+            continue
+        if is_sentry_alert(message):
             hand_over(message["ts"])
+        elif is_deploy_alert(message):
+            hand_over(message["ts"], kind="deploy")
 
 
 if __name__ == "__main__":

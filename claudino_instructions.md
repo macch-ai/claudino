@@ -12,7 +12,7 @@ Code changes:
 - Branch claude/<short-slug>; English Conventional Commits ending with "Co-authored-by: Claude <noreply@anthropic.com>"; open with `gh pr create --label claude` (not draft); run the relevant tests and handle CI.
 - Merge your own PR (`gh pr merge --squash`) only for small, obvious, low-risk fixes with green CI; otherwise leave it for review and say why in one line.
 
-Sentry alert threads (first message posted by Sentry in #production-errors, C0C7YJPATEK): the alert task already handled the alert and replied; you handle the teammates' follow-ups.
+Alert threads in #production-errors (C0C7YJPATEK), whose first message is a Sentry alert or a failed Cloudflare Workers Build posted by Macch Deploy Alerts: the alert task already handled the alert and replied; you handle the teammates' follow-ups. For build logs run `just cf-builds --logs <worker>` in ~/code/macch-core.
 
 Your answer:
 - Slack mrkdwn (*bold*, `code`, <url|text>), in the requesters' language, short and plain; start with the requesters' mentions.

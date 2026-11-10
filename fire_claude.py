@@ -1,4 +1,4 @@
-"""Fire the Claude Code scheduled task that handles one Sentry alert."""
+"""Fire the Claude Code scheduled task that handles one alert in #production-errors."""
 import json, sys, urllib.request
 from pathlib import Path
 
@@ -7,10 +7,15 @@ TOKEN_FILE = Path.home() / ".config/claude-alert-fire/token"
 CHANNEL_ID = "C0C7YJPATEK"
 
 
-def fire(ts: str, extra: str = "") -> str:
-    text = (f"alert_ts={ts}\nchannel={CHANNEL_ID}\n"
-            "A new Sentry alert was posted at the top level of #production-errors. "
-            "Read it and its thread with the Slack connector.")
+def fire(ts: str, extra: str = "", kind: str = "sentry") -> str:
+    if kind == "deploy":
+        text = (f"deploy_alert_ts={ts}\nchannel={CHANNEL_ID}\n"
+                "A Cloudflare Workers Build failed: Macch Deploy Alerts posted it at the top level "
+                "of #production-errors. Read it and its thread with the Slack connector.")
+    else:
+        text = (f"alert_ts={ts}\nchannel={CHANNEL_ID}\n"
+                "A new Sentry alert was posted at the top level of #production-errors. "
+                "Read it and its thread with the Slack connector.")
     text += extra
     return fire_text(text)
 

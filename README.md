@@ -2,7 +2,7 @@
 
 Slack relay that hands Macch's engineering work to Claude Code on **hermes**.
 
-- **Sentry alerts**: each new top-level Sentry alert in #production-errors fires the "claudino: alertas y menciones (hermes)" scheduled task (`fire_claude.py`), which investigates and replies in the alert thread.
+- **Sentry and deploy alerts**: each new top-level Sentry alert, or failed Cloudflare Workers Build posted by the Macch Deploy Alerts app, in #production-errors fires the "claudino: alertas y menciones (hermes)" scheduled task (`fire_claude.py`), which investigates and replies in the alert thread.
 - **Mentions**: `@claudino` in any public channel it belongs to opens a Claude Code session on hermes (`claude_cli.py`, auto permission mode). Each Slack thread keeps one session that is resumed on every new message, and the relay posts the answer.
 - **Threads**: once claudino is part of a thread, teammates' replies reach it without a mention (unless they mention someone else). Requests sent while a run is working are queued and handled together afterwards.
 - **Reactions**: every request gets an emoji chosen by Haiku (standard or the workspace's custom emoji), with :eyes: as fallback.
