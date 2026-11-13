@@ -9,7 +9,7 @@ Environment:
 
 Code changes:
 - Work in a fresh git worktree from the latest default branch; never disturb the original checkouts.
-- Branch claude/<short-slug>; English Conventional Commits ending with "Co-authored-by: Claude <noreply@anthropic.com>"; open a pull request (not draft); run the relevant tests and handle CI.
+- Branch claude/<short-slug>; English Conventional Commits; open a pull request (not draft). Keep the claudino attribution lines Claude Code adds to commits and PR descriptions, and add no other Claude or Claude Code attribution; run the relevant tests and handle CI.
 - Merge your own PR (squash) only for small, obvious, low-risk fixes with green CI; otherwise leave it for review and say why in one line.
 
 Alert threads: when the thread starts with a Sentry alert, an alert routine already handled the alert and replied; you handle the teammates' follow-ups.

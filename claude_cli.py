@@ -16,6 +16,10 @@ INSTRUCTIONS_FILE = Path(__file__).with_name("claudino_instructions.md")
 # The system prompt goes to Claude in a file and the prompt on stdin: under CLAUDINO_RUN_AS, sudo logs
 # every command line to the journal and auth.log, and Slack threads do not belong there.
 SYSTEM_PROMPT_FILE = config.STATE_DIR / "system-prompt.md"
+# claudino's own mark on commits and PRs, replacing Claude Code's "Generated with Claude Code" one, so the
+# team can tell claudino's work apart from their own Claude Code sessions.
+ATTRIBUTION = {"commit": "Co-authored-by: claudino <noreply@anthropic.com>",
+               "pr": "🤖 Generated with claudino, Claude Code in Slack"}
 
 log = logging.getLogger("claude-relay")
 _lock = threading.Lock()
@@ -72,6 +76,11 @@ def model_args() -> list:
     """--model and --effort when CLAUDINO_MODEL / CLAUDINO_EFFORT set them."""
     args = ["--model", config.MODEL] if config.MODEL else []
     return args + (["--effort", config.EFFORT] if config.EFFORT else [])
+
+
+def settings_args() -> list:
+    """Claude Code settings every run gets on top of the user's own."""
+    return ["--settings", json.dumps({"attribution": ATTRIBUTION})]
 
 
 def main_model(data: dict) -> str:
@@ -152,7 +161,7 @@ def _claude(prompt: str, session_id: str | None, key: str = "", new: bool = Fals
     """Run claude and return its result event. Every other event of its stream-json output goes to
     on_event as it arrives (assistant turns, tool results), so the relay can show the work live."""
     cmd = ["claude", "-p", "--output-format", "stream-json", "--verbose", *permission_args(), *model_args(),
-           "--append-system-prompt-file", instructions_file()]
+           *settings_args(), "--append-system-prompt-file", instructions_file()]
     if session_id:
         cmd += ["--session-id" if new else "--resume", session_id]
     with _runs_lock:

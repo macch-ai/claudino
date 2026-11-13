@@ -1,3 +1,4 @@
+import json
 import os
 import signal
 import tempfile
@@ -115,6 +116,13 @@ class ClaudeCliTest(unittest.TestCase):
         cmd = self.claude_cmd(PERMISSION_MODE="auto")
         self.assertEqual(cmd[cmd.index("--permission-mode") + 1], "auto")
         self.assertNotIn("--dangerously-skip-permissions", cmd)
+
+    def test_commits_and_prs_carry_the_claudino_mark(self):
+        cmd = self.claude_cmd(RUN_AS="")
+        attribution = json.loads(cmd[cmd.index("--settings") + 1])["attribution"]
+        self.assertIn("claudino", attribution["commit"])
+        self.assertIn("claudino", attribution["pr"])
+        self.assertNotIn("Claude Code]", attribution["pr"])
 
     def test_prompt_suffix_is_appended(self):
         self.claude_cmd(PROMPT_SUFFIX="caveman mode")
