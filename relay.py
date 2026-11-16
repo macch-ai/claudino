@@ -745,6 +745,11 @@ def reply_done(thread_ts: str) -> None:
     start(state["channel"], thread_ts, state["pending"])
 
 
+# A teammate's new message: plain, or with files (Slack marks those file_share). Edits, deletions,
+# joins and the like are ignored.
+USER_SUBTYPES = {None, "file_share"}
+
+
 @app.event("message")
 def on_message(event: dict) -> None:
     if is_sentry_alert(event):
@@ -757,7 +762,7 @@ def on_message(event: dict) -> None:
         if event.get("thread_ts") and event.get("ts") not in progress.STREAM_MESSAGES and not streaming(event["thread_ts"]):
             reply_done(event["thread_ts"])
         return
-    if event.get("subtype") or event.get("bot_id") or not event.get("user"):
+    if event.get("subtype") not in USER_SUBTYPES or event.get("bot_id") or not event.get("user"):
         return
     if not addressed_to_claudino(event):
         return
