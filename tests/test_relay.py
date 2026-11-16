@@ -135,6 +135,12 @@ class OnMessageTest(RelayTest):
             self.r.on_message({**self.msg(f"<@{RELAY_USER_ID}> hi"), "subtype": "message_changed"})
         dispatch.assert_not_called()
 
+    def test_message_with_files_is_dispatched(self):
+        with mock.patch.object(self.r, "dispatch") as dispatch:
+            self.r.on_message({**self.msg(f"<@{RELAY_USER_ID}> look", ts="1.0"), "subtype": "file_share",
+                               "files": [{"id": "F1"}]})
+        dispatch.assert_called_once()
+
     def test_claudino_reply_ends_the_run(self):
         with mock.patch.object(self.r, "reply_done") as reply_done:
             self.r.on_message({"channel": "C1", "user": RELAY_USER_ID, "bot_id": "B1", "ts": "3.0", "thread_ts": "1.0"})
